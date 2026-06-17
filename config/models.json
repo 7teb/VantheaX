@@ -1,0 +1,46 @@
+[
+  {
+    "id": "deepseek/deepseek-v4-flash",
+    "label": "DeepSeek V4 Flash",
+    "provider": "DeepSeek",
+    "providerKey": "deepseek",
+    "efforts": ["high", "xhigh"],
+    "defaultEffort": "high",
+    "supportsVision": false,
+    "contextLength": 1048576,
+    "maxOutput": 131072
+  },
+  {
+    "id": "deepseek/deepseek-v4-pro",
+    "label": "DeepSeek V4 Pro",
+    "provider": "DeepSeek",
+    "providerKey": "deepseek",
+    "efforts": ["high", "xhigh"],
+    "defaultEffort": "xhigh",
+    "supportsVision": false,
+    "contextLength": 1048576,
+    "maxOutput": 384000
+  },
+  {
+    "id": "qwen/qwen3.7-plus",
+    "label": "Qwen 3.7 Plus",
+    "provider": "Qwen",
+    "providerKey": "qwen",
+    "efforts": ["low", "medium", "high", "xhigh"],
+    "defaultEffort": "high",
+    "supportsVision": true,
+    "contextLength": 1000000,
+    "maxOutput": 65536
+  },
+  {
+    "id": "qwen/qwen3.7-max",
+    "label": "Qwen 3.7 Max",
+    "provider": "Qwen",
+    "providerKey": "qwen",
+    "efforts": ["low", "medium", "high", "xhigh"],
+    "defaultEffort": "high",
+    "supportsVision": true,
+    "contextLength": 1000000,
+    "maxOutput": 65536
+  }
+]
