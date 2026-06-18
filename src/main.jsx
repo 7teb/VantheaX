@@ -110,6 +110,17 @@ const STRINGS = {
     "action.edit": "Edit",
     "edit.cancel": "Cancel",
     "edit.resend": "Resend",
+    "context.title": "Context usage",
+    "context.total": "Total context",
+    "context.cat.system": "System prompt",
+    "context.cat.tools": "Tools",
+    "context.cat.mcp": "MCP",
+    "context.cat.messages": "Messages",
+    "context.cat.code": "Code (read)",
+    "context.compact": "Compact",
+    "context.compactQueued": "Compacts after this turn",
+    "context.compressing": "Compressing context",
+    "context.compactedHere": "Earlier messages compressed",
     "toollabel.working": "Working",
     "inspector.title": "Inspector",
     "inspector.noFile": "No file selected",
@@ -296,6 +307,17 @@ const STRINGS = {
     "action.edit": "Bearbeiten",
     "edit.cancel": "Abbrechen",
     "edit.resend": "Neu senden",
+    "context.title": "Kontext-Auslastung",
+    "context.total": "Gesamt-Kontext",
+    "context.cat.system": "System-Prompt",
+    "context.cat.tools": "Tools",
+    "context.cat.mcp": "MCP",
+    "context.cat.messages": "Nachrichten",
+    "context.cat.code": "Code (gelesen)",
+    "context.compact": "Komprimieren",
+    "context.compactQueued": "Komprimiert nach diesem Turn",
+    "context.compressing": "Kontext wird komprimiert",
+    "context.compactedHere": "Frühere Nachrichten komprimiert",
     "toollabel.working": "Arbeitet",
     "inspector.title": "Inspector",
     "inspector.noFile": "Keine Datei gewählt",
@@ -426,6 +448,8 @@ const makeChat = (projectPath = "") => ({
   pinned: false,
   title: "New chat",
   messages: [],
+  summary: "",
+  summaryCount: 0,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
@@ -453,6 +477,42 @@ const collectReadPaths = (messages) => {
     }
   }
   return paths;
+};
+
+const COMPACT_THRESHOLD = 0.95;
+const KEEP_RAW_TURNS = 3;
+
+const collectChangedFiles = (messages) => {
+  const seen = new Set();
+  const paths = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const tool of message.tools || []) {
+      if ((tool.name === "write_file" || tool.name === "replace_in_file") && tool.result?.written) {
+        const candidate = tool.result?.path || tool.args?.path;
+        if (candidate && !seen.has(candidate)) {
+          seen.add(candidate);
+          paths.push(candidate);
+        }
+      }
+    }
+  }
+  return paths;
+};
+
+const rawCutoffIndex = (messages, keepTurns) => {
+  let userSeen = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "user") {
+      userSeen += 1;
+      if (userSeen >= keepTurns) {
+        return i;
+      }
+    }
+  }
+  return 0;
 };
 
 const titleFromText = (text) => {
@@ -515,6 +575,10 @@ const App = () => {
   const [projectPath, setProjectPath] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
   const [resendText, setResendText] = useState(null);
+  const [contextOrbOpen, setContextOrbOpen] = useState(false);
+  const [contextUsage, setContextUsage] = useState(null);
+  const [pendingCompact, setPendingCompact] = useState(null);
+  const [compressing, setCompressing] = useState(false);
   const [projectIndex, setProjectIndex] = useState(emptyIndex);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState("");
@@ -554,6 +618,8 @@ const App = () => {
   const activeMsgRef = useRef(null);
   const messagesRef = useRef(null);
   const atBottomRef = useRef(true);
+  const contextStampRef = useRef(-1);
+  const compactingRef = useRef(false);
 
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [chats, activeChatId]);
   useEffect(() => {
@@ -650,6 +716,7 @@ const App = () => {
         setProjectMenuOpen(false);
         setSettingsOpen(false);
         setChatMenuOpen(false);
+        setContextOrbOpen(false);
       }
     };
     window.addEventListener("keydown", close);
@@ -657,10 +724,13 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!plusMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen) {
+    if (!plusMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !contextOrbOpen) {
       return;
     }
     const onDown = (event) => {
+      if (!event.target.closest(".context-panel") && !event.target.closest(".context-orb")) {
+        setContextOrbOpen(false);
+      }
       if (!event.target.closest(".plus-picker")) {
         setPlusMenuOpen(false);
       }
@@ -679,7 +749,7 @@ const App = () => {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [plusMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen]);
+  }, [plusMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, contextOrbOpen]);
 
   useEffect(() => {
     if (!chatsLoadedRef.current) {
@@ -931,10 +1001,109 @@ const App = () => {
       if (idx < 0) {
         return item;
       }
-      return { ...item, messages: item.messages.slice(0, idx) };
+      const reset = idx <= (item.summaryCount || 0) ? { summary: "", summaryCount: 0 } : {};
+      return { ...item, messages: item.messages.slice(0, idx), ...reset };
     }));
     setResendText(text);
   };
+
+  const refreshContextUsage = async () => {
+    const chat = activeChat;
+    const start = chat?.summaryCount || 0;
+    const fullLen = (chat?.messages || messages).length;
+    const eff = (chat?.messages || messages).slice(start);
+    try {
+      const usage = await api.estimateContext({
+        projectPath,
+        model: settings.model,
+        effort: settings.effort,
+        mode: settings.mode,
+        planMode,
+        goalMode,
+        goal: goalText,
+        message: "",
+        summary: chat?.summary || "",
+        history: cleanHistory(eff),
+        readPaths: collectReadPaths(eff),
+      });
+      setContextUsage(usage);
+      contextStampRef.current = fullLen;
+    } catch {}
+  };
+
+  const compactChatNow = async (chat, msgs, start) => {
+    const cutoff = rawCutoffIndex(msgs, KEEP_RAW_TURNS);
+    if (cutoff <= start) {
+      return { summary: chat.summary || "", summaryCount: start, changed: false };
+    }
+    const toCompact = msgs.slice(start, cutoff);
+    const changedFiles = collectChangedFiles(toCompact);
+    const res = await api.compactContext({
+      priorSummary: chat.summary || "",
+      turns: cleanHistory(toCompact),
+      changedFiles,
+    });
+    const next = res && !res.error ? String(res.summary || "").trim() : "";
+    if (!next) {
+      return { summary: chat.summary || "", summaryCount: start, changed: false };
+    }
+    updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, summary: next, summaryCount: cutoff, updatedAt: new Date().toISOString() } : item));
+    return { summary: next, summaryCount: cutoff, changed: true };
+  };
+
+  const runContextCompaction = async (chatId) => {
+    setContextOrbOpen(false);
+    const chat = chatId ? (chats.find((c) => c.id === chatId) || null) : activeChat;
+    if (!chat || compactingRef.current) {
+      return;
+    }
+    const msgs = chat.messages || [];
+    const start = chat.summaryCount || 0;
+    if (rawCutoffIndex(msgs, KEEP_RAW_TURNS) <= start) {
+      return;
+    }
+    compactingRef.current = true;
+    setCompressing(true);
+    try {
+      await compactChatNow(chat, msgs, start);
+      refreshContextUsage();
+    } finally {
+      setCompressing(false);
+      compactingRef.current = false;
+    }
+  };
+
+  const requestCompact = () => {
+    if (busy) {
+      setPendingCompact(activeChat?.id || null);
+      setContextOrbOpen(false);
+      return;
+    }
+    runContextCompaction();
+  };
+
+  const toggleContextOrb = () => {
+    const next = !contextOrbOpen;
+    setContextOrbOpen(next);
+    if (next) {
+      setTodoPanelOpen(false);
+      refreshContextUsage();
+    }
+  };
+
+  useEffect(() => {
+    if (!busy) {
+      refreshContextUsage();
+    }
+  }, [activeChatId, busy]);
+
+  useEffect(() => {
+    if (!busy && pendingCompact) {
+      const id = pendingCompact;
+      setPendingCompact(null);
+      runContextCompaction(id);
+    }
+  }, [busy, pendingCompact]);
 
   const openFile = async (file) => {
     setSelectedFile(file);
@@ -1015,6 +1184,40 @@ const App = () => {
       const mapped = (exists ? current : [chat, ...current]).map((item) => item.id === chat.id ? { ...item, title: nextTitle, projectPath, messages: nextMessages, updatedAt: new Date().toISOString() } : item);
       return mapped;
     });
+    let effSummary = chat.summary || "";
+    let effStart = chat.summaryCount || 0;
+    const ctxBudget = (contextUsage && contextUsage.budget) || 512000;
+    const projected = (contextUsage?.total || 0) + estTokens(userMessage.content);
+    const usageFresh = contextUsage && contextStampRef.current === previousMessages.length;
+    if (!usageFresh || projected >= 0.85 * ctxBudget) {
+      try {
+        const usage = await api.estimateContext({
+          projectPath,
+          model: settings.model,
+          effort: settings.effort,
+          mode: settings.mode,
+          planMode: effectivePlanMode,
+          goalMode,
+          goal: effectiveGoal,
+          message: userMessage.content,
+          summary: effSummary,
+          history: cleanHistory(previousMessages.slice(effStart)),
+          readPaths: collectReadPaths(previousMessages.slice(effStart)),
+        });
+        if (usage && usage.budget && usage.total >= COMPACT_THRESHOLD * usage.budget && !compactingRef.current) {
+          compactingRef.current = true;
+          setCompressing(true);
+          try {
+            const res = await compactChatNow(chat, previousMessages, effStart);
+            effSummary = res.summary;
+            effStart = res.summaryCount;
+          } finally {
+            setCompressing(false);
+            compactingRef.current = false;
+          }
+        }
+      } catch {}
+    }
     try {
       const result = await api.sendMessage({
         requestId,
@@ -1029,8 +1232,9 @@ const App = () => {
         message: userMessage.content,
         imageDataUrl: imageAttachment?.dataUrl || "",
         supportsVision: Boolean(currentModel?.supportsVision),
-        history: cleanHistory(previousMessages),
-        readPaths: collectReadPaths(previousMessages),
+        summary: effSummary,
+        history: cleanHistory(previousMessages.slice(effStart)),
+        readPaths: collectReadPaths(previousMessages.slice(effStart)),
       }, (event) => {
         if (event.type === "delta") {
           updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
@@ -1257,7 +1461,9 @@ const App = () => {
         </aside>
 
         <main className={messages.length ? "chat-panel has-messages" : "chat-panel is-empty"}>
-          <button className={todoPanelOpen ? "todo-toggle is-on" : "todo-toggle"} onClick={() => setTodoPanelOpen(!todoPanelOpen)} title={t("todo.tasks")}><ListIcon size={16} /></button>
+          <ContextOrb usage={contextUsage} open={contextOrbOpen} onToggle={toggleContextOrb} />
+          <ContextPanel usage={contextUsage} open={contextOrbOpen} onCompact={requestCompact} pendingCompact={pendingCompact} />
+          <button className={todoPanelOpen ? "todo-toggle is-on" : "todo-toggle"} onClick={() => { setTodoPanelOpen(!todoPanelOpen); setContextOrbOpen(false); }} title={t("todo.tasks")}><ListIcon size={16} /></button>
           <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={todoPanelOpen} />
           {messages.length > 0 && (
             <header className="chat-header">
@@ -1291,13 +1497,18 @@ const App = () => {
           {messages.length > 0 && (
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
               {messages.map((message, index) => (
-                <Message key={message.id || `${message.createdAt}-${index}`} message={message} onAcceptPlan={acceptPlan}
-                  isLastUser={message.role === "user" && message.id === lastUserId}
-                  editing={editingMessageId === message.id}
-                  onStartEdit={() => startEditMessage(message)}
-                  onCancelEdit={cancelEditMessage}
-                  onSubmitEdit={(text) => submitEditMessage(message.id, text)}
-                  busy={busy} />
+                <React.Fragment key={message.id || `${message.createdAt}-${index}`}>
+                  {index === (activeChat?.summaryCount || 0) && (activeChat?.summaryCount || 0) > 0 && (
+                    <div className="compaction-marker"><span>{t("context.compactedHere")}</span></div>
+                  )}
+                  <Message message={message} onAcceptPlan={acceptPlan}
+                    isLastUser={message.role === "user" && message.id === lastUserId}
+                    editing={editingMessageId === message.id}
+                    onStartEdit={() => startEditMessage(message)}
+                    onCancelEdit={cancelEditMessage}
+                    onSubmitEdit={(text) => submitEditMessage(message.id, text)}
+                    busy={busy} />
+                </React.Fragment>
               ))}
             </div>
           )}
@@ -1319,6 +1530,7 @@ const App = () => {
                 {!currentModel?.supportsVision && <div className="vision-warning">{t("vision.warning")}</div>}
               </div>
             )}
+            {compressing && <CompressingOverlay />}
             <div className="composer-stack">
               {pendingPermission ? (
                 <ApprovalForm tool={pendingPermission.tool} onResolve={(decision) => resolvePermission(pendingPermission.callId, decision)} />
@@ -1594,6 +1806,78 @@ const formatMessageTime = (iso) => {
     return "";
   }
 };
+
+const formatTokens = (n) => {
+  const v = Math.max(0, Math.round(n || 0));
+  if (v >= 1000) {
+    return `${(v / 1000).toFixed(v >= 100000 ? 0 : 1)}k`;
+  }
+  return String(v);
+};
+
+const estTokens = (text) => {
+  const s = String(text || "");
+  const bytes = new TextEncoder().encode(s).length;
+  return Math.ceil(s.length / 4 + (bytes - s.length) / 2);
+};
+
+const ContextOrb = ({ usage, open, onToggle }) => {
+  const budget = usage?.budget || 512000;
+  const total = usage?.total || 0;
+  const pct = budget > 0 ? Math.min(1, total / budget) : 0;
+  return (
+    <button className={open ? "context-orb is-open" : "context-orb"} onClick={onToggle} title={t("context.title")}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" className="context-orb-track" />
+        <circle cx="12" cy="12" r="9" className="context-orb-fill" pathLength="100" style={{ strokeDasharray: 100, strokeDashoffset: 100 - pct * 100 }} />
+      </svg>
+    </button>
+  );
+};
+
+const ContextPanel = ({ usage, open, onCompact, pendingCompact }) => {
+  const budget = usage?.budget || 512000;
+  const total = usage?.total || 0;
+  const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : 0;
+  const rows = ["system", "tools", "mcp", "messages", "code"].map((key) => ({ key, value: usage?.breakdown?.[key] || 0 }));
+  return (
+    <div className={open ? "context-panel open" : "context-panel"}>
+      <div className="context-row context-total">
+        <div className="context-row-head">
+          <span className="context-row-label">{t("context.total")}</span>
+          <span className="context-row-value">{formatTokens(total)} / {formatTokens(budget)} · {pct}%</span>
+        </div>
+        <div className="context-bar"><span className="context-bar-fill" style={{ width: `${pct}%` }} /></div>
+      </div>
+      <div className="context-divider" />
+      <ul className="context-rows">
+        {rows.map((row) => (
+          <li className="context-row" key={row.key}>
+            <div className="context-row-head">
+              <span className="context-row-label">{t(`context.cat.${row.key}`)}</span>
+              <span className="context-row-value">{formatTokens(row.value)}</span>
+            </div>
+            <div className="context-bar"><span className="context-bar-fill" style={{ width: `${budget > 0 ? Math.min(100, (row.value / budget) * 100) : 0}%` }} /></div>
+          </li>
+        ))}
+      </ul>
+      <button type="button" className="context-compact" onClick={onCompact}>{pendingCompact ? t("context.compactQueued") : t("context.compact")}</button>
+    </div>
+  );
+};
+
+const CompressingOverlay = () => (
+  <div className="compressing">
+    <svg className="compressing-screen" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+      <circle className="compressing-eye" cx="9" cy="10" r="1.3" fill="currentColor" stroke="none" />
+      <circle className="compressing-eye" cx="15" cy="10" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+    <span className="live-label" data-shimmer-label={t("context.compressing")}>{t("context.compressing")}</span>
+  </div>
+);
 
 const TodoPanel = ({ todos, goalMode, goal, goalDone, open }) => (
   <div className={open ? "todo-panel open" : "todo-panel"}>
@@ -2030,7 +2314,6 @@ const ToolStep = ({ tool }) => {
         <div className="running-head">
           <span className="step-marker"><Icon size={14} /></span>
           <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
-          {(result.mcpTier || result.tier) && <span className={`risk-badge risk-${result.mcpTier || result.tier}`}>{t(`risk.${result.mcpTier || result.tier}`)}</span>}
           <span className="running-dots" aria-hidden="true"><i /><i /><i /></span>
         </div>
         {liveOut && <pre className="running-output">{liveOut.slice(-2000)}</pre>}
@@ -2044,7 +2327,6 @@ const ToolStep = ({ tool }) => {
       <summary>
         <span className="step-marker"><Icon size={14} /></span>
         <span className="step-label">{label}</span>
-        {(result.mcpTier || result.tier) && <span className={`risk-badge risk-${result.mcpTier || result.tier}`}>{t(`risk.${result.mcpTier || result.tier}`)}</span>}
         {needsPermission && <span className="permission-actions"><span className="awaiting-approval">{t("tool.awaiting")}</span></span>}
       </summary>
       <div className="step-body">

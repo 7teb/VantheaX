@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld("agentApi", {
   setMcpSessionTrust: (server, trusted) => ipcRenderer.invoke("mcp:setSessionTrust", server, trusted),
   reconnectMcp: (name) => ipcRenderer.invoke("mcp:reconnect", name),
   detectMcpServer: () => ipcRenderer.invoke("mcp:detectFolder"),
+  estimateContext: (payload) => ipcRenderer.invoke("context:estimate", payload),
+  compactContext: (payload) => ipcRenderer.invoke("context:compact", payload),
   sendMessage: (payload, onEvent) => {
     const requestId = payload.requestId || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const listener = (_, event) => {

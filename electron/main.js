@@ -16,7 +16,11 @@ const textExtensions = new Set([".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".js",
 const maxIndexFileBytes = 2 * 1024 * 1024;
 const maxReadLines = 50000;
 const readMaxTokens = 25000;
-const estimateTokens = (text) => Math.ceil(String(text || "").length / 4);
+const estimateTokens = (text) => {
+  const s = String(text || "");
+  const nonAscii = Buffer.byteLength(s, "utf8") - s.length;
+  return Math.ceil(s.length / 4 + nonAscii / 2);
+};
 const maxGrepMatches = 5000;
 const maxToolRounds = 100;
 const maxCommands = 200;
@@ -853,6 +857,33 @@ const classifyCommand = async (settings, command, userContext = []) => {
   }
 };
 
+const summarizerSystemPrompt = "You compress the earlier part of an ongoing coding conversation into a compact structured summary, so it can replace the raw earlier messages in the model's context without losing what matters. Output ONLY the summary, no preamble, no closing remarks. Use these sections, each as a short terse bullet list, and omit any section that would be empty: GOAL (what the user is ultimately trying to achieve), DECISIONS (concrete choices made and the reason), CHANGED FILES (each file created or edited and what changed in it), STATE (what currently works, what was just completed), OPEN (unfinished steps, known issues, agreed next actions). Keep file paths, function names and key identifiers verbatim. Be specific but brief. Never invent anything that is not in the input. Do not include raw code blocks or long quotes; describe changes, do not paste them.";
+
+const summarizeConversation = async (settings, priorSummary, turns, changedFiles) => {
+  const list = Array.isArray(turns) ? turns : [];
+  const turnsText = list.map((m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${String(m.content || "").slice(0, 8000)}`).join("\n\n");
+  const files = Array.isArray(changedFiles) ? changedFiles : [];
+  const filesText = files.length ? `\n\nFILES CHANGED IN THIS RANGE (paths):\n${files.join("\n")}` : "";
+  const priorBlock = priorSummary ? `EXISTING SUMMARY OF EVEN EARLIER MESSAGES (fold its facts into the new summary, do not drop them):\n${priorSummary}\n\n` : "";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const body = {
+      model: "deepseek/deepseek-v4-pro",
+      messages: [
+        { role: "system", content: summarizerSystemPrompt },
+        { role: "user", content: `${priorBlock}CONVERSATION MESSAGES TO SUMMARIZE (oldest first):\n${turnsText}${filesText}` },
+      ],
+      temperature: 0,
+      max_tokens: 4000,
+    };
+    const data = await fetchOpenRouter(settings, body, controller.signal);
+    return String(data.choices?.[0]?.message?.content || "").trim();
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const pendingWrites = new Map();
 
 const applyPendingWrite = async (id) => {
@@ -1309,12 +1340,16 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     "Use tools before answering questions about project code. Keep answers direct and technical, grounded in files or command output.",
     "Before any destructive or system-changing action (deleting or overwriting files outside the project, or touching the OS, Windows, the registry, disks, or boot config), first read or list exactly what you are about to affect, then ask the user to confirm in plain words. Never destroy or overwrite something the user did not clearly ask you to. A few truly catastrophic commands (formatting a drive, deleting Windows/System32/Program Files/a drive root/boot files, diskpart, bcdedit, deleting HKEY_LOCAL_MACHINE registry keys) are hard-blocked and will never run from this app no matter what, do not attempt them or workarounds; if the user genuinely needs one, tell them to run it themselves in a real terminal.",
     `Command permission mode: ${mode}.`,
+    "In Auto permission mode a separate overseer model (a safety classifier) reviews every command that is not plain read-only before it runs: commands it considers safe for the user's request run automatically, commands it considers risky are paused and the user is asked to approve them first. So in Auto, do not assume a non-read-only command always runs silently, and keep each command clearly scoped to what the user actually asked so the overseer can see it is legitimate. The overseer judges only run_command, never your file reads or edits, and the few catastrophic system-destroying commands stay hard-blocked in every mode no matter what it says.",
   ];
   if (payload.planMode) {
     lines.push("PLAN MODE IS ON. You may ONLY read and inspect the project (read_file, list_files, grep_files, get_file_outline). Do NOT write files or run commands. Once you understand the task, you MUST present your plan by calling the present_plan tool, do NOT write the plan as a normal text message. The present_plan tool call is the ONLY way the user can review and approve your plan. Do not write any code yet.");
   }
   if (payload.goalMode && payload.goal) {
     lines.push(`GOAL MODE IS ON. You are working toward this goal until it is actually achieved: "${payload.goal}". Keep going until it is implemented and tested. When you believe the goal is fully done, call the submit_result tool, a second model verifies your work and either confirms or sends you back to fix issues. Do not just stop; submit_result is the only way to finish.`);
+  }
+  if (payload.summary) {
+    lines.push(`EARLIER CONVERSATION SUMMARY: the start of this conversation was compacted to save context. The raw earlier messages are gone, but here is a structured summary of what happened before the messages you can see below. Treat it as established history. If you need the exact contents of any file mentioned, re-read it with read_file rather than guessing.\n\n${payload.summary}`);
   }
   lines.push("This app supports MCP (Model Context Protocol). Connected local MCP servers expose their tools to you automatically as mcp__<server>__<tool>; call them like any other tool. There are TWO ways a server gets connected, and you can drive one of them: (1) The user can add one themselves in Settings > MCP servers, either by clicking 'Choose plugin folder' (the app auto-detects the launch command) or by pasting the server's mcpServers config (the same JSON style as Claude Desktop). (2) YOU can add one for the user with the add_mcp_server tool when they ask you to set up / add / connect a server and tell you where it lives. Strongly prefer passing folder = the absolute path to the server's folder, because the app then inspects that folder's README and files and figures out the exact command and args itself, you do NOT need to read or understand the server's internals. Only pass an explicit command/args if the user already handed you the exact config. You cannot read files outside the open project, so never try to read an external server folder with read_file, just pass its path as folder to add_mcp_server and let the app detect it. Adding a server always requires the user's approval, and you cannot uninstall the underlying software. Dangerous MCP tools (writing memory, patching, injecting, executing code) are gated and may be denied or require the user to trust them for the session, do not assume they will run; if denied, explain and ask.");
   const mcpConnected = mcpManager.connectedSummary();
@@ -1330,6 +1365,46 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   const shownList = fileList.length > 80000 ? `${fileList.slice(0, 80000)}\n[file list truncated, use grep_files / list_files for the rest]` : fileList;
   lines.push(`Project files (${index.files.length} total), PATHS ONLY, contents not included here. Before answering about or editing a file you have not read, read it with read_file (or search with grep_files / get_file_outline). Do not assume or invent file contents.\n${shownList}`);
   return lines.join("\n\n");
+};
+
+const contextBudget = 512000;
+
+const buildReadCacheForEstimate = async (projectPath, readPaths) => {
+  const readFiles = [];
+  let budget = 300000;
+  for (const rel of (readPaths || []).slice(0, 60)) {
+    if (budget <= 0) {
+      break;
+    }
+    try {
+      const file = await readProjectFile(projectPath, rel, 1, 2000);
+      const content = file.content.slice(0, budget);
+      readFiles.push({ path: file.path, content });
+      budget -= content.length;
+    } catch {}
+  }
+  return readFiles;
+};
+
+const estimateContext = async (payload) => {
+  const projectPath = payload.projectPath || await ensureWorkspace();
+  const index = await buildProjectIndex(projectPath);
+  const readFiles = await buildReadCacheForEstimate(projectPath, payload.readPaths);
+  const systemText = buildSystemPrompt(index, payload.mode, payload, []);
+  const codeText = readFiles.map((file) => `=== ${file.path} ===\n${file.content}`).join("\n\n");
+  const mcpSpecs = payload.planMode ? [] : mcpManager.getToolSpecs();
+  const allSpecs = toolsForContext(payload);
+  const nativeSpecs = allSpecs.slice(0, Math.max(0, allSpecs.length - mcpSpecs.length));
+  const history = (payload.history || []);
+  const historyText = history.map((m) => typeof m.content === "string" ? m.content : JSON.stringify(m.content || "")).join("\n");
+  const messageText = typeof payload.message === "string" ? payload.message : "";
+  const system = estimateTokens(systemText);
+  const code = estimateTokens(codeText);
+  const tools = estimateTokens(JSON.stringify(nativeSpecs));
+  const mcp = estimateTokens(JSON.stringify(mcpSpecs));
+  const messages = estimateTokens(historyText) + estimateTokens(messageText);
+  const total = system + code + tools + mcp + messages;
+  return { total, budget: contextBudget, breakdown: { system, tools, mcp, messages, code } };
 };
 
 const buildUserContent = (text, imageDataUrl) => {
@@ -1584,7 +1659,7 @@ const runAgentStream = async (payload, sender) => {
   activeStreams.set(payload.requestId, controller);
   const messages = [
     { role: "system", content: buildSystemPrompt(index, payload.mode, payload, readFiles) },
-    ...(payload.history || []).slice(-500),
+    ...(payload.history || []),
     { role: "user", content: buildUserContent(payload.message, payload.imageDataUrl) },
   ];
   const userContext = [
@@ -1622,6 +1697,10 @@ const runAgentStream = async (payload, sender) => {
       } catch (error) {
         if (controller.signal.aborted) {
           break;
+        }
+        const m = String(error?.message || "");
+        if (/\b400\b/.test(m) && /context|token|maximum|too long|length/i.test(m)) {
+          throw new Error(`The conversation grew too large for the model's context window during this turn. Use the Compact button or start a new chat. (${m.slice(0, 240)})`);
         }
         throw error;
       }
@@ -2111,6 +2190,24 @@ ipcMain.handle("project:index", async (_, projectPath) => await buildProjectInde
 ipcMain.handle("project:readFile", async (_, projectPath, relativePath) => await readProjectFile(projectPath, relativePath));
 ipcMain.handle("permission:resolve", (_, callId, payload) => ({ ok: resolvePermission(callId, payload) }));
 ipcMain.handle("mcp:status", () => mcpManager.getStatusForRenderer());
+
+ipcMain.handle("context:estimate", async (_, payload) => {
+  try {
+    return await estimateContext(payload || {});
+  } catch {
+    return { total: 0, budget: contextBudget, breakdown: { system: 0, tools: 0, mcp: 0, messages: 0, code: 0 } };
+  }
+});
+
+ipcMain.handle("context:compact", async (_, payload) => {
+  const settings = await readSettings();
+  try {
+    const summary = await summarizeConversation(settings, payload?.priorSummary || "", payload?.turns || [], payload?.changedFiles || []);
+    return { summary };
+  } catch (error) {
+    return { error: String(error?.message || error || "compaction failed") };
+  }
+});
 ipcMain.handle("mcp:setToolRisk", async (_, server, tool, tier) => {
   const raw = await readJson(getUserFile("settings.json"), {});
   const servers = raw.mcpServers || {};
