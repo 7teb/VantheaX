@@ -199,7 +199,7 @@ export const buildToolSpec = (server, tool) => {
   }
   let description = capDescription(tool.description, `${tool.name} (MCP server ${server})`);
   if (degraded) {
-    description = capDescription(`${description} [schema omitted: too large — pass arguments as the server expects]`);
+    description = capDescription(`${description} [schema omitted: too large, pass arguments as the server expects]`);
   }
   const specName = tool.specFullName || `mcp__${server}__${tool.name}`;
   return { type: "function", function: { name: specName, description, parameters: params } };
@@ -218,7 +218,7 @@ export const capMcpResult = (res, server, tool, tier) => {
       const len = String(part.data || "").length;
       texts.push(`[image: ${part.mimeType || "image"}, ${len} base64 chars omitted]`);
     } else if (part.type === "resource") {
-      texts.push(`[resource: ${part.resource?.uri || "embedded"} — not inlined]`);
+      texts.push(`[resource: ${part.resource?.uri || "embedded"}, not inlined]`);
     } else {
       texts.push(`[${part.type || "unknown"} content omitted]`);
     }
@@ -226,7 +226,7 @@ export const capMcpResult = (res, server, tool, tier) => {
   let content = texts.join("\n");
   let truncated = false;
   if (content.length > MCP_MAX_RESULT_CHARS) {
-    content = `${content.slice(0, MCP_MAX_RESULT_CHARS)}\n…[MCP result truncated: showing ${MCP_MAX_RESULT_CHARS} of ${content.length} chars — request a smaller range or page]`;
+    content = `${content.slice(0, MCP_MAX_RESULT_CHARS)}\n…[MCP result truncated: showing ${MCP_MAX_RESULT_CHARS} of ${content.length} chars, request a smaller range or page]`;
     truncated = true;
   }
   const isError = Boolean(res?.isError);

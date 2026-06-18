@@ -50,7 +50,7 @@ const STRINGS = {
     "perm.auto": "Auto",
     "perm.autoDesc": "Safe commands run, risky ask",
     "perm.full": "Full auto",
-    "perm.fullDesc": "Everything runs, only system-killers blocked",
+    "perm.fullDesc": "Runs every command, including dangerous ones",
     "model.select": "Select model",
     "model.effort": "Reasoning effort",
     "model.fallback": "Model",
@@ -62,15 +62,13 @@ const STRINGS = {
     "project.addExisting": "Add existing folder",
     "project.without": "Work without project",
     "plan.title": "Plan",
-    "plan.risk": "Risk: {level}",
-    "plan.riskTitle": "Plan risk assessment",
     "plan.keyChanges": "Key changes",
     "plan.files": "Files",
     "plan.testPlan": "Test plan",
     "plan.assumptions": "Assumptions",
     "plan.implementing": "Implementing plan…",
     "plan.accepted": "Accepted",
-    "plan.rejected": "Plan dismissed — tell me what to change.",
+    "plan.rejected": "Plan dismissed. Tell me what to change.",
     "plan.question": "Implement this plan?",
     "plan.no": "No",
     "plan.yes": "Yes, implement",
@@ -106,6 +104,12 @@ const STRINGS = {
     "toollabel.editing": "Editing {x}",
     "toollabel.reading": "Reading {x}",
     "toollabel.listing": "Listing files",
+    "toollabel.addTodos": "Adding todos",
+    "toollabel.updateTodos": "Updating todos",
+    "action.copy": "Copy",
+    "action.edit": "Edit",
+    "edit.cancel": "Cancel",
+    "edit.resend": "Resend",
     "toollabel.working": "Working",
     "inspector.title": "Inspector",
     "inspector.noFile": "No file selected",
@@ -154,7 +158,7 @@ const STRINGS = {
     "approval.questionWrite": "May I write to {x}?",
     "approval.questionAddMcp": "May I add and connect the MCP server “{x}”?",
     "approval.yes": "Yes",
-    "approval.no": "No — tell it what to do differently",
+    "approval.no": "No, tell it what to do differently",
     "approval.skip": "Skip",
     "approval.submit": "Submit",
     "approval.prefix": "Yes, and don't ask again for commands starting with: {x}",
@@ -232,7 +236,7 @@ const STRINGS = {
     "perm.auto": "Auto",
     "perm.autoDesc": "Sichere laufen, riskante fragen",
     "perm.full": "Voll-Auto",
-    "perm.fullDesc": "Alles läuft, nur System-Killer blockiert",
+    "perm.fullDesc": "Führt jeden Befehl aus, auch gefährliche",
     "model.select": "Modell wählen",
     "model.effort": "Reasoning-Aufwand",
     "model.fallback": "Modell",
@@ -244,15 +248,13 @@ const STRINGS = {
     "project.addExisting": "Vorhandenen Ordner hinzufügen",
     "project.without": "Ohne Projekt arbeiten",
     "plan.title": "Plan",
-    "plan.risk": "Risiko: {level}",
-    "plan.riskTitle": "Risikoeinschätzung des Plans",
     "plan.keyChanges": "Wichtige Änderungen",
     "plan.files": "Dateien",
     "plan.testPlan": "Testplan",
     "plan.assumptions": "Annahmen",
     "plan.implementing": "Plan wird implementiert…",
     "plan.accepted": "Übernommen",
-    "plan.rejected": "Plan verworfen — sag mir, was anders soll.",
+    "plan.rejected": "Plan verworfen. Sag mir, was anders soll.",
     "plan.question": "Diesen Plan implementieren?",
     "plan.no": "Nein",
     "plan.yes": "Ja, implementieren",
@@ -288,6 +290,12 @@ const STRINGS = {
     "toollabel.editing": "Bearbeitet {x}",
     "toollabel.reading": "Liest {x}",
     "toollabel.listing": "Listet Dateien",
+    "toollabel.addTodos": "To-dos hinzufügen",
+    "toollabel.updateTodos": "To-dos aktualisieren",
+    "action.copy": "Kopieren",
+    "action.edit": "Bearbeiten",
+    "edit.cancel": "Abbrechen",
+    "edit.resend": "Neu senden",
     "toollabel.working": "Arbeitet",
     "inspector.title": "Inspector",
     "inspector.noFile": "Keine Datei gewählt",
@@ -336,7 +344,7 @@ const STRINGS = {
     "approval.questionWrite": "Darf ich {x} schreiben?",
     "approval.questionAddMcp": "Darf ich den MCP-Server „{x}“ hinzufügen und verbinden?",
     "approval.yes": "Ja",
-    "approval.no": "Nein — sag, was anders gemacht werden soll",
+    "approval.no": "Nein, sag was anders gemacht werden soll",
     "approval.skip": "Überspringen",
     "approval.submit": "Absenden",
     "approval.prefix": "Ja, und bei Befehlen nicht mehr nachfragen, die beginnen mit: {x}",
@@ -505,6 +513,8 @@ const App = () => {
   const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [] });
   const [models, setModels] = useState([]);
   const [projectPath, setProjectPath] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState("");
+  const [resendText, setResendText] = useState(null);
   const [projectIndex, setProjectIndex] = useState(emptyIndex);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState("");
@@ -519,7 +529,7 @@ const App = () => {
   const [modelOpen, setModelOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
   const [openProviders, setOpenProviders] = useState([]);
-  const [collapsedProjects, setCollapsedProjects] = useState([]);
+  const [collapsedProjects, setCollapsedProjects] = useState(() => { try { return JSON.parse(localStorage.getItem("vantheax:collapsed-projects")) || []; } catch { return []; } });
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [renamingChatId, setRenamingChatId] = useState("");
   const [renameValue, setRenameValue] = useState("");
@@ -570,6 +580,14 @@ const App = () => {
     setGoalDone(done);
   }, [activeChatId]);
   const messages = activeChat?.messages || [];
+  const lastUserId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === "user") {
+        return messages[i].id;
+      }
+    }
+    return null;
+  }, [messages]);
   const currentModel = useMemo(() => models.find((model) => model.id === settings.model) || models[0], [models, settings.model]);
   LANG = settings.language || "en";
 
@@ -583,11 +601,23 @@ const App = () => {
         await api.saveChats(storedChats);
         localStorage.removeItem(chatsKey);
       }
+      const clearRunningTool = (entry) => (entry?.result?.running
+        ? { ...entry, result: { ...entry.result, running: false, error: entry.result.error || "(command interrupted, the app was closed before it finished)" } }
+        : entry);
       storedChats = storedChats.map((chat) => ({
         ...chat,
-        messages: (chat.messages || []).map((message) => (message.role === "assistant" && message.done === false)
-          ? { ...message, done: true, cancelled: true }
-          : message),
+        messages: (chat.messages || []).map((message) => {
+          let next = (message.role === "assistant" && message.done === false) ? { ...message, done: true, cancelled: true } : message;
+          if (next.role === "assistant") {
+            if (Array.isArray(next.segments)) {
+              next = { ...next, segments: next.segments.map((seg) => seg.type === "tool" ? { ...seg, tool: clearRunningTool(seg.tool) } : seg) };
+            }
+            if (Array.isArray(next.tools)) {
+              next = { ...next, tools: next.tools.map(clearRunningTool) };
+            }
+          }
+          return next;
+        }),
       }));
       const storedActive = localStorage.getItem(activeChatKey) || "";
       setSettings(loadedSettings);
@@ -836,6 +866,14 @@ const App = () => {
     }
   }, [messages]);
 
+  useEffect(() => {
+    if (resendText != null && !busy) {
+      const txt = resendText;
+      setResendText(null);
+      sendMessage(txt);
+    }
+  }, [resendText, busy]);
+
   const newChat = () => {
     cancelActiveStream();
     atBottomRef.current = true;
@@ -856,10 +894,46 @@ const App = () => {
     setSearchOpen(false);
     setTodos([]);
     setGoalDone(false);
-    if (chat.projectPath && chat.projectPath !== projectPath) {
-      setProjectPath(chat.projectPath);
-      await refreshProject(chat.projectPath);
+    if (normPath(chat.projectPath) !== normPath(projectPath)) {
+      if (chat.projectPath) {
+        setProjectPath(chat.projectPath);
+        await refreshProject(chat.projectPath);
+      } else {
+        setProjectPath("");
+        setProjectIndex(emptyIndex);
+        setStatus(t("status.ready"));
+      }
     }
+  };
+
+  const startEditMessage = (message) => {
+    if (busy) {
+      return;
+    }
+    setEditingMessageId(message.id);
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMessageId("");
+  };
+
+  const submitEditMessage = (messageId, newText) => {
+    const text = (newText || "").trim();
+    if (!text || busy) {
+      return;
+    }
+    setEditingMessageId("");
+    updateChats((current) => current.map((item) => {
+      if (item.id !== activeChatId) {
+        return item;
+      }
+      const idx = (item.messages || []).findIndex((m) => m.id === messageId);
+      if (idx < 0) {
+        return item;
+      }
+      return { ...item, messages: item.messages.slice(0, idx) };
+    }));
+    setResendText(text);
   };
 
   const openFile = async (file) => {
@@ -1138,7 +1212,7 @@ const App = () => {
                           <FolderClosed size={15} />
                           <span className="project-head-name">{folderName(item)}</span>
                         </button>
-                        <button className={collapsed ? "project-collapse is-collapsed" : "project-collapse"} title={collapsed ? t("tree.showChats") : t("tree.hideChats")} onClick={() => setCollapsedProjects((current) => current.includes(item) ? current.filter((entry) => entry !== item) : [...current, item])}>
+                        <button className={collapsed ? "project-collapse is-collapsed" : "project-collapse"} title={collapsed ? t("tree.showChats") : t("tree.hideChats")} onClick={() => setCollapsedProjects((current) => { const next = current.includes(item) ? current.filter((entry) => entry !== item) : [...current, item]; try { localStorage.setItem("vantheax:collapsed-projects", JSON.stringify(next)); } catch {} return next; })}>
                           <ChevronDown size={15} />
                         </button>
                       </div>
@@ -1217,7 +1291,13 @@ const App = () => {
           {messages.length > 0 && (
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
               {messages.map((message, index) => (
-                <Message key={message.id || `${message.createdAt}-${index}`} message={message} onAcceptPlan={acceptPlan} />
+                <Message key={message.id || `${message.createdAt}-${index}`} message={message} onAcceptPlan={acceptPlan}
+                  isLastUser={message.role === "user" && message.id === lastUserId}
+                  editing={editingMessageId === message.id}
+                  onStartEdit={() => startEditMessage(message)}
+                  onCancelEdit={cancelEditMessage}
+                  onSubmitEdit={(text) => submitEditMessage(message.id, text)}
+                  busy={busy} />
               ))}
             </div>
           )}
@@ -1294,7 +1374,7 @@ const compactModelName = (model) => {
   if (!model?.label) {
     return t("model.fallback");
   }
-  return model.label.replace(/^DeepSeek\s+/i, "").replace(/^Qwen\s+/i, "Qwen ");
+  return model.label;
 };
 
 const EFFORT_LABEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Max" };
@@ -1483,6 +1563,38 @@ const TaskCheckIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const SquarePenIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
+  </svg>
+);
+
+const PencilIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+    <path d="m15 5 4 4" />
+  </svg>
+);
+
+const CopyIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+  </svg>
+);
+
+const formatMessageTime = (iso) => {
+  if (!iso) {
+    return "";
+  }
+  try {
+    return new Date(iso).toLocaleString(LANG === "de" ? "de-DE" : "en-US", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+};
+
 const TodoPanel = ({ todos, goalMode, goal, goalDone, open }) => (
   <div className={open ? "todo-panel open" : "todo-panel"}>
     <div className="todo-section-title">{t("todo.tasks")}</div>
@@ -1558,7 +1670,6 @@ const PlanCard = ({ plan, onAccept }) => {
       <div className="plan-card-head">
         <ListChecks size={15} />
         <span>{t("plan.title")}</span>
-        {plan.riskLevel && <span className={`plan-risk risk-${String(plan.riskLevel).toLowerCase()}`} title={t("plan.riskTitle")}>{t("plan.risk", { level: plan.riskLevel })}</span>}
       </div>
       {plan.summary && <p className="plan-summary">{plan.summary}</p>}
       {Boolean(plan.keyChanges?.length) && (
@@ -1686,7 +1797,7 @@ const clusterKind = (tool) => {
     return "edits";
   }
   const result = tool.result || {};
-  if (result.permissionRequired || result.error || result.denied) {
+  if (result.running || result.permissionRequired || result.error || result.denied) {
     return null;
   }
   if (tool.name === "run_command" && result.exitCode !== undefined) {
@@ -1708,7 +1819,11 @@ const groupWorkSegments = (segments) => {
       continue;
     }
     const tool = seg.tool;
-    if (tool?.result?.plan || tool?.result?.todos) {
+    if (tool?.result?.plan) {
+      continue;
+    }
+    if (tool?.result?.todos) {
+      blocks.push({ kind: "todos", tool });
       continue;
     }
     const kind = clusterKind(tool);
@@ -1908,6 +2023,20 @@ const ToolStep = ({ tool }) => {
   const needsPermission = result.permissionRequired;
   const Icon = getToolIcon(tool.name);
   const label = getToolLabel(tool);
+  if (result.running) {
+    const liveOut = `${result.stdout || ""}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
+    return (
+      <div className="tool-step running">
+        <div className="running-head">
+          <span className="step-marker"><Icon size={14} /></span>
+          <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
+          {(result.mcpTier || result.tier) && <span className={`risk-badge risk-${result.mcpTier || result.tier}`}>{t(`risk.${result.mcpTier || result.tier}`)}</span>}
+          <span className="running-dots" aria-hidden="true"><i /><i /><i /></span>
+        </div>
+        {liveOut && <pre className="running-output">{liveOut.slice(-2000)}</pre>}
+      </div>
+    );
+  }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
   const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || hasListing || result.verifier);
   return (
@@ -1931,8 +2060,8 @@ const ToolStep = ({ tool }) => {
         {result.content && <pre>{result.content}</pre>}
         {hasListing && ((result.directories?.length || result.files?.length)
           ? <pre>{[...(result.directories || []).map((e) => `${e.path || e}/`), ...(result.files || []).map((e) => e.path || e)].slice(0, 300).join("\n")}</pre>
-          : <div className="tool-meta">{result.summary || "—"}</div>)}
-        {result.verifier && <div className="tool-meta">{result.verifier.done ? t("tool.verifiedDone") : t("tool.notDone")} — {result.verifier.feedback}</div>}
+          : <div className="tool-meta">{result.summary || "·"}</div>)}
+        {result.verifier && <div className="tool-meta">{result.verifier.done ? t("tool.verifiedDone") : t("tool.notDone")} · {result.verifier.feedback}</div>}
         {!hasBody && <pre>{JSON.stringify(result, null, 2)}</pre>}
       </div>
     </details>
@@ -1953,6 +2082,17 @@ const LiveToolStep = ({ tool }) => {
   );
 };
 
+const TodoStep = ({ tool }) => {
+  const todos = tool?.result?.todos || [];
+  const label = todos.some((item) => item.done) ? t("toollabel.updateTodos") : t("toollabel.addTodos");
+  return (
+    <div className="tool-step todo-step">
+      <span className="step-marker todo-step-mark"><SquarePenIcon size={14} /></span>
+      <span className="step-label">{label}</span>
+    </div>
+  );
+};
+
 const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
   const [open, setOpen] = useState(working);
   const touchedRef = useRef(false);
@@ -1964,12 +2104,12 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
   const elapsed = useElapsedSeconds(startedAt, working);
   const blocks = groupWorkSegments(segments);
   return (
-    <details className="worklog" open={open}>
-      <summary className="worklog-head" onClick={(event) => { event.preventDefault(); touchedRef.current = true; setOpen(!open); }}>
+    <details className="worklog" open={working ? true : open}>
+      <summary className={working ? "worklog-head is-working" : "worklog-head"} onClick={(event) => { event.preventDefault(); if (working) { return; } touchedRef.current = true; setOpen(!open); }}>
         {working
           ? <span className="live-label" data-shimmer-label={t("work.workingSince", { s: elapsed })}>{t("work.workingSince", { s: elapsed })}</span>
           : <span>{t("work.worked", { time: formatWorkTime(workMs) })}</span>}
-        <ChevronRight size={14} className={`worklog-chevron ${open ? "open" : ""}`} />
+        {!working && <ChevronRight size={14} className={`worklog-chevron ${open ? "open" : ""}`} />}
       </summary>
       <div className="worklog-body">
         {blocks.map((block, idx) => {
@@ -1984,6 +2124,9 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
               ? <ToolStep tool={block.tools[0]} key={idx} />
               : <CommandGroup tools={block.tools} kind={block.kind} key={idx} />;
           }
+          if (block.kind === "todos") {
+            return <TodoStep tool={block.tool} key={idx} />;
+          }
           return <ToolStep tool={block.tool} key={idx} />;
         })}
         {liveTool && <LiveToolStep tool={liveTool} />}
@@ -1992,14 +2135,51 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
   );
 };
 
-const Message = ({ message, onAcceptPlan }) => {
+const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy }) => {
   const sawWorkingRef = useRef(false);
+  const [draft, setDraft] = useState(message.content || "");
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!message.done) {
       sawWorkingRef.current = true;
     }
   }, [message.done]);
+  useEffect(() => {
+    if (editing) {
+      setDraft(message.content || "");
+    }
+  }, [editing]);
   if (message.role === "user") {
+    if (editing) {
+      const rows = Math.min(14, Math.max(2, (draft.match(/\n/g) || []).length + 1));
+      return (
+        <div className="message user">
+          <div className="user-editor">
+            <textarea className="user-editor-input" value={draft} autoFocus rows={rows}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  onCancelEdit();
+                }
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  onSubmitEdit(draft);
+                }
+              }} />
+            <div className="user-editor-actions">
+              <button type="button" className="user-editor-cancel" onClick={onCancelEdit}>{t("edit.cancel")}</button>
+              <button type="button" className="user-editor-save" onClick={() => onSubmitEdit(draft)} disabled={!draft.trim()}>{t("edit.resend")}</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    const copyMessage = () => {
+      try {
+        navigator.clipboard?.writeText(message.content || "");
+      } catch {}
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    };
     return (
       <div className="message user">
         <div className="message-surface user-surface">
@@ -2010,6 +2190,11 @@ const Message = ({ message, onAcceptPlan }) => {
             </div>
           )}
           <div className="message-text plain">{message.content}</div>
+        </div>
+        <div className="user-actions">
+          {message.createdAt && <span className="user-time">{formatMessageTime(message.createdAt)}</span>}
+          <button type="button" className="user-action" title={t("action.copy")} onClick={copyMessage}>{copied ? <Check size={13} /> : <CopyIcon size={13} />}</button>
+          {isLastUser && !busy && <button type="button" className="user-action" title={t("action.edit")} onClick={onStartEdit}><PencilIcon size={13} /></button>}
         </div>
       </div>
     );
@@ -2032,12 +2217,18 @@ const Message = ({ message, onAcceptPlan }) => {
     let finalText = "";
     if (hasWork && !message.liveTool) {
       let cut = segs.length;
-      while (cut > 0 && segs[cut - 1].type === "text") {
-        cut -= 1;
+      while (cut > 0) {
+        const seg = segs[cut - 1];
+        if (seg.type === "text" || (seg.type === "tool" && seg.tool.result?.todos)) {
+          cut -= 1;
+          continue;
+        }
+        break;
       }
-      const trailing = segs.slice(cut).filter((seg) => seg.type === "text" && (seg.content || "").trim());
+      const tail = segs.slice(cut);
+      const trailing = tail.filter((seg) => seg.type === "text" && (seg.content || "").trim());
       if (trailing.length) {
-        workSegs = segs.slice(0, cut);
+        workSegs = [...segs.slice(0, cut), ...tail.filter((seg) => seg.type === "tool")];
         finalText = trailing.map((seg) => seg.content).join("");
       }
     }
