@@ -11,7 +11,7 @@ A private, local code agent for Windows. A desktop app (Electron + React) that t
 ## Setup
 
 ```powershell
-git clone https://github.com/7yariz/VantheaX.git
+git clone https://github.com/7teb/VantheaX.git
 cd VantheaX
 npm install
 ```
