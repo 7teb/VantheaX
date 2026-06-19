@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, KeyRound, ListChecks, MessageSquare, Mic, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, X } from "lucide-react";
 import MarkdownMessage from "./Markdown.jsx";
 import "./styles.css";
 
@@ -26,6 +26,28 @@ const STRINGS = {
     "menu.view": "View",
     "menu.window": "Window",
     "menu.help": "Help",
+    "mi.newChat": "New chat",
+    "mi.openProject": "Open project",
+    "mi.settings": "Settings",
+    "mi.closeWindow": "Close window",
+    "mi.undo": "Undo",
+    "mi.redo": "Redo",
+    "mi.cut": "Cut",
+    "mi.copy": "Copy",
+    "mi.paste": "Paste",
+    "mi.selectAll": "Select all",
+    "mi.toggleSidebar": "Toggle sidebar",
+    "mi.toggleTasks": "Toggle tasks panel",
+    "mi.search": "Search chats",
+    "mi.prevChat": "Previous chat",
+    "mi.nextChat": "Next chat",
+    "mi.zoomIn": "Zoom in",
+    "mi.zoomOut": "Zoom out",
+    "mi.actualSize": "Actual size",
+    "mi.fullscreen": "Toggle full screen",
+    "mi.minimize": "Minimize",
+    "mi.maximize": "Maximize",
+    "mi.about": "About VantheaX",
     "win.minimize": "Minimize",
     "win.maximize": "Maximize",
     "win.close": "Close",
@@ -186,7 +208,6 @@ const STRINGS = {
     "search.placeholder": "Search local chats",
     "search.noProject": "No project",
     "search.noResults": "No chats found",
-    "mic.title": "Microphone",
     "status.ready": "Ready",
     "status.indexing": "Indexing project",
     "status.approved": "Approved, working…",
@@ -223,6 +244,28 @@ const STRINGS = {
     "menu.view": "Anzeigen",
     "menu.window": "Fenster",
     "menu.help": "Hilfe",
+    "mi.newChat": "Neuer Chat",
+    "mi.openProject": "Projekt öffnen",
+    "mi.settings": "Einstellungen",
+    "mi.closeWindow": "Fenster schließen",
+    "mi.undo": "Rückgängig",
+    "mi.redo": "Wiederholen",
+    "mi.cut": "Ausschneiden",
+    "mi.copy": "Kopieren",
+    "mi.paste": "Einfügen",
+    "mi.selectAll": "Alles auswählen",
+    "mi.toggleSidebar": "Seitenleiste umschalten",
+    "mi.toggleTasks": "Aufgaben-Panel umschalten",
+    "mi.search": "Chats durchsuchen",
+    "mi.prevChat": "Vorheriger Chat",
+    "mi.nextChat": "Nächster Chat",
+    "mi.zoomIn": "Vergrößern",
+    "mi.zoomOut": "Verkleinern",
+    "mi.actualSize": "Originalgröße",
+    "mi.fullscreen": "Vollbild umschalten",
+    "mi.minimize": "Minimieren",
+    "mi.maximize": "Maximieren",
+    "mi.about": "Über VantheaX",
     "win.minimize": "Minimieren",
     "win.maximize": "Maximieren",
     "win.close": "Schließen",
@@ -383,7 +426,6 @@ const STRINGS = {
     "search.placeholder": "Lokale Chats durchsuchen",
     "search.noProject": "Kein Projekt",
     "search.noResults": "Keine Chats gefunden",
-    "mic.title": "Mikrofon",
     "status.ready": "Bereit",
     "status.indexing": "Projekt wird indexiert",
     "status.approved": "Freigegeben, arbeite…",
@@ -612,6 +654,7 @@ const App = () => {
   const [goalDone, setGoalDone] = useState(false);
   const [pendingPermission, setPendingPermission] = useState(null);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [titleMenuOpen, setTitleMenuOpen] = useState(null);
   const fileInputRef = useRef(null);
   const chatsLoadedRef = useRef(false);
   const activeRequestRef = useRef(null);
@@ -717,6 +760,7 @@ const App = () => {
         setSettingsOpen(false);
         setChatMenuOpen(false);
         setContextOrbOpen(false);
+        setTitleMenuOpen(null);
       }
     };
     window.addEventListener("keydown", close);
@@ -724,10 +768,13 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!plusMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !contextOrbOpen) {
+    if (!plusMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !contextOrbOpen && titleMenuOpen === null) {
       return;
     }
     const onDown = (event) => {
+      if (!event.target.closest(".titlebar-menu")) {
+        setTitleMenuOpen(null);
+      }
       if (!event.target.closest(".context-panel") && !event.target.closest(".context-orb")) {
         setContextOrbOpen(false);
       }
@@ -749,7 +796,7 @@ const App = () => {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [plusMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, contextOrbOpen]);
+  }, [plusMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, contextOrbOpen, titleMenuOpen]);
 
   useEffect(() => {
     if (!chatsLoadedRef.current) {
@@ -957,6 +1004,69 @@ const App = () => {
     setGoalDone(false);
   };
 
+  const navigateChat = (dir) => {
+    if (!chats.length) {
+      return;
+    }
+    const idx = chats.findIndex((c) => c.id === activeChatId);
+    const nextIdx = idx < 0 ? 0 : (idx + dir + chats.length) % chats.length;
+    openChat(chats[nextIdx]);
+  };
+
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "F11") {
+        event.preventDefault();
+        api.toggleFullscreen();
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+      const k = event.key.toLowerCase();
+      if (event.shiftKey) {
+        if (k === "arrowup") {
+          event.preventDefault();
+          navigateChat(-1);
+        } else if (k === "arrowdown") {
+          event.preventDefault();
+          navigateChat(1);
+        }
+        return;
+      }
+      if (k === "n") {
+        event.preventDefault();
+        newChat();
+      } else if (k === "o") {
+        event.preventDefault();
+        chooseProject();
+      } else if (k === "b") {
+        event.preventDefault();
+        setSidebarCollapsed((value) => !value);
+      } else if (k === "j") {
+        event.preventDefault();
+        setTodoPanelOpen((value) => !value);
+      } else if (k === "f") {
+        event.preventDefault();
+        setSearchOpen(true);
+      } else if (k === ",") {
+        event.preventDefault();
+        setSettingsOpen(true);
+      } else if (k === "0") {
+        event.preventDefault();
+        api.zoomWindow(0);
+      } else if (k === "-") {
+        event.preventDefault();
+        api.zoomWindow(-1);
+      } else if (k === "+" || k === "=") {
+        event.preventDefault();
+        api.zoomWindow(1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [chats, activeChatId, projectPath]);
+
   const openChat = async (chat) => {
     cancelActiveStream();
     atBottomRef.current = true;
@@ -1147,7 +1257,7 @@ const App = () => {
     if (goalMode && !goalText.trim() && text) {
       setGoalText(text);
     }
-    if ((!text && !imageAttachment) || busy) {
+    if ((!text && !imageAttachment) || busy || compactingRef.current) {
       return;
     }
     if (imageAttachment && !currentModel?.supportsVision) {
@@ -1217,6 +1327,9 @@ const App = () => {
           }
         }
       } catch {}
+    }
+    if (activeRequestRef.current !== requestId) {
+      return;
     }
     try {
       const result = await api.sendMessage({
@@ -1328,6 +1441,9 @@ const App = () => {
     const plan =
       (planMsg && (planMsg.tools || []).find((tt) => tt.result && tt.result.plan)?.result.plan) ||
       (planMsg && (planMsg.segments || []).find((s) => s.type === "tool" && s.tool.result && s.tool.result.plan)?.tool.result.plan) || null;
+    if (planMsg) {
+      updateChats((current) => current.map((c) => c.id === activeChat?.id ? { ...c, messages: (c.messages || []).map((m) => m.id === planMsg.id ? { ...m, planAccepted: true } : m) } : c));
+    }
     const lines = [];
     if (plan) {
       if (plan.summary) lines.push(`Summary: ${plan.summary}`);
@@ -1365,19 +1481,30 @@ const App = () => {
           <button className="chrome-button sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? t("title.sidebarOpen") : t("title.sidebarClose")}>
             <PanelLeft size={15} />
           </button>
-          <button className="chrome-button" title={t("title.back")}>
+          <button className="chrome-button" onClick={() => navigateChat(-1)} title={t("title.back")}>
             <ChevronLeft size={15} />
           </button>
-          <button className="chrome-button" title={t("title.forward")}>
+          <button className="chrome-button" onClick={() => navigateChat(1)} title={t("title.forward")}>
             <ChevronRight size={15} />
           </button>
-          <nav className="titlebar-menu">
-            <button>{t("menu.file")}</button>
-            <button>{t("menu.edit")}</button>
-            <button>{t("menu.view")}</button>
-            <button>{t("menu.window")}</button>
-            <button>{t("menu.help")}</button>
-          </nav>
+          <TitlebarMenu open={titleMenuOpen} setOpen={setTitleMenuOpen} actions={{
+            newChat,
+            openProject: chooseProject,
+            settings: () => setSettingsOpen(true),
+            closeWindow: () => api.closeWindow(),
+            toggleSidebar: () => setSidebarCollapsed((value) => !value),
+            toggleTasks: () => setTodoPanelOpen((value) => !value),
+            search: () => setSearchOpen(true),
+            prevChat: () => navigateChat(-1),
+            nextChat: () => navigateChat(1),
+            zoomIn: () => api.zoomWindow(1),
+            zoomOut: () => api.zoomWindow(-1),
+            actualSize: () => api.zoomWindow(0),
+            fullscreen: () => api.toggleFullscreen(),
+            minimize: () => api.minimizeWindow(),
+            maximize: () => api.maximizeWindow(),
+            about: () => setSettingsOpen(true),
+          }} />
         </div>
         <div className="titlebar-center" />
         <div className="titlebar-actions">
@@ -1539,17 +1666,16 @@ const App = () => {
                 <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={goalMode && !goalText ? t("composer.goalPlaceholder") : t("composer.placeholder")} />
                 <div className="composer-controls">
                   <input ref={fileInputRef} className="hidden-input" type="file" accept="image/*" onChange={onImageSelected} />
-                  <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => setPlanMode((value) => !value)} onToggleGoal={() => setGoalMode((value) => !value)} />
+                  <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
                   <PermissionPicker value={settings.mode} open={permissionOpen} onToggle={() => setPermissionOpen(!permissionOpen)} onChange={(mode) => { persistSettings({ mode }); setPermissionOpen(false); }} />
                   <div className="composer-spacer" />
                   <ModelEffortPicker models={models} value={settings.model} effort={settings.effort} open={modelOpen} openProviders={openProviders} onToggle={() => setModelOpen(!modelOpen)} onToggleProvider={(provider) => setOpenProviders((current) => current.includes(provider) ? current.filter((item) => item !== provider) : [...current, provider])} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} />
-                  <button className="tool-button mic-button" title={t("mic.title")}><Mic size={16} /></button>
                   {busy ? (
                     <button className="send-button is-stopping" onClick={stopGeneration} title={t("composer.stop")}>
                       <Square size={15} />
                     </button>
                   ) : (
-                    <button className="send-button" onClick={sendMessage} disabled={(!input.trim() && !imageAttachment) || Boolean(imageAttachment && !currentModel?.supportsVision)}>
+                    <button className="send-button" onClick={sendMessage} disabled={compressing || (!input.trim() && !imageAttachment) || Boolean(imageAttachment && !currentModel?.supportsVision)}>
                       <ArrowUp size={18} />
                     </button>
                   )}
@@ -1692,6 +1818,69 @@ const ProjectPicker = ({ open, query, setQuery, projects, selectedPath, onToggle
       </div>
   </div>
 );
+
+const TitlebarMenu = ({ open, setOpen, actions }) => {
+  const ed = (cmd) => () => { try { document.execCommand(cmd); } catch (e) {} };
+  const menus = [
+    { id: "file", label: t("menu.file"), items: [
+      { label: t("mi.newChat"), sc: "Ctrl+N", fn: actions.newChat },
+      { label: t("mi.openProject"), sc: "Ctrl+O", fn: actions.openProject },
+      { sep: true },
+      { label: t("mi.settings"), sc: "Ctrl+,", fn: actions.settings },
+      { sep: true },
+      { label: t("mi.closeWindow"), sc: "Ctrl+W", fn: actions.closeWindow },
+    ] },
+    { id: "edit", label: t("menu.edit"), items: [
+      { label: t("mi.undo"), sc: "Ctrl+Z", fn: ed("undo") },
+      { label: t("mi.redo"), sc: "Ctrl+Y", fn: ed("redo") },
+      { sep: true },
+      { label: t("mi.cut"), sc: "Ctrl+X", fn: ed("cut") },
+      { label: t("mi.copy"), sc: "Ctrl+C", fn: ed("copy") },
+      { label: t("mi.paste"), sc: "Ctrl+V", fn: ed("paste") },
+      { sep: true },
+      { label: t("mi.selectAll"), sc: "Ctrl+A", fn: ed("selectAll") },
+    ] },
+    { id: "view", label: t("menu.view"), items: [
+      { label: t("mi.toggleSidebar"), sc: "Ctrl+B", fn: actions.toggleSidebar },
+      { label: t("mi.toggleTasks"), sc: "Ctrl+J", fn: actions.toggleTasks },
+      { label: t("mi.search"), sc: "Ctrl+F", fn: actions.search },
+      { sep: true },
+      { label: t("mi.prevChat"), sc: "Ctrl+Shift+Up", fn: actions.prevChat },
+      { label: t("mi.nextChat"), sc: "Ctrl+Shift+Down", fn: actions.nextChat },
+      { sep: true },
+      { label: t("mi.zoomIn"), sc: "Ctrl++", fn: actions.zoomIn },
+      { label: t("mi.zoomOut"), sc: "Ctrl+-", fn: actions.zoomOut },
+      { label: t("mi.actualSize"), sc: "Ctrl+0", fn: actions.actualSize },
+      { sep: true },
+      { label: t("mi.fullscreen"), sc: "F11", fn: actions.fullscreen },
+    ] },
+    { id: "window", label: t("menu.window"), items: [
+      { label: t("mi.minimize"), fn: actions.minimize },
+      { label: t("mi.maximize"), fn: actions.maximize },
+      { sep: true },
+      { label: t("mi.closeWindow"), sc: "Ctrl+W", fn: actions.closeWindow },
+    ] },
+    { id: "help", label: t("menu.help"), items: [
+      { label: t("mi.about"), fn: actions.about },
+    ] },
+  ];
+  return (
+    <nav className="titlebar-menu">
+      {menus.map((menu) => (
+        <div key={menu.id} className="titlebar-menu-group">
+          <button className={open === menu.id ? "is-open" : ""} onClick={() => setOpen(open === menu.id ? null : menu.id)} onMouseEnter={() => { if (open !== null) { setOpen(menu.id); } }}>{menu.label}</button>
+          {open === menu.id && (
+            <div className="titlebar-dropdown">
+              {menu.items.map((item, index) => item.sep
+                ? <div key={index} className="titlebar-dropdown-sep" />
+                : <button key={index} className="titlebar-dropdown-item" onClick={() => { setOpen(null); if (item.fn) { item.fn(); } }}><span>{item.label}</span>{item.sc && <span className="titlebar-sc">{item.sc}</span>}</button>)}
+            </div>
+          )}
+        </div>
+      ))}
+    </nav>
+  );
+};
 
 const PlusMenu = ({ open, onToggle, onPickFile, planMode, goalMode, onTogglePlan, onToggleGoal }) => (
   <div className="plus-picker">
@@ -1947,8 +2136,16 @@ const PermissionPicker = ({ value, open, onToggle, onChange }) => {
   );
 };
 
-const PlanCard = ({ plan, onAccept }) => {
+const PlanCard = ({ plan, onAccept, accepted }) => {
   const [decided, setDecided] = useState(null);
+  if (accepted || decided === "yes") {
+    return (
+      <div className="plan-accepted-row">
+        <Check size={13} />
+        <span>{t("plan.accepted")}</span>
+      </div>
+    );
+  }
   return (
     <div className="plan-card">
       <div className="plan-card-head">
@@ -1981,7 +2178,6 @@ const PlanCard = ({ plan, onAccept }) => {
         </div>
       )}
       <div className="plan-card-foot">
-        {decided === "yes" && <span className="plan-status"><Check size={13} />{t("plan.accepted")}</span>}
         {decided === "no" && <span className="plan-status">{t("plan.rejected")}</span>}
         {!decided && (
           <>
@@ -2518,7 +2714,7 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
       <div className="message assistant">
         <div className="message-surface assistant-surface">
           {hasWork && <WorkLog segments={workSegs} startedAt={message.startedAt} workMs={message.workMs} working={working} liveTool={working ? message.liveTool : null} />}
-          {planSeg && <PlanCard plan={planSeg.tool.result.plan} onAccept={onAcceptPlan} />}
+          {planSeg && <PlanCard plan={planSeg.tool.result.plan} onAccept={onAcceptPlan} accepted={message.planAccepted} />}
           {hasWork
             ? (Boolean(finalText) && <div className="message-text markdown"><MarkdownMessage content={finalText} /></div>)
             : (working
@@ -2533,7 +2729,7 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
     <div className="message assistant">
       <div className="message-surface assistant-surface">
         {Boolean((message.content || "").trim()) && <div className="message-text markdown"><MarkdownMessage content={message.content} /></div>}
-        {planTool && <PlanCard plan={planTool.result.plan} onAccept={onAcceptPlan} />}
+        {planTool && <PlanCard plan={planTool.result.plan} onAccept={onAcceptPlan} accepted={message.planAccepted} />}
         {Boolean(message.tools?.length) && <ToolTimeline tools={message.tools} />}
       </div>
     </div>

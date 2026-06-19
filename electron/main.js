@@ -1,6 +1,8 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mcpManager, extractCommandArg, extractTargetScope, scopeKey, collectArgStrings } from "./mcp.js";
@@ -470,6 +472,43 @@ const readProjectFile = async (projectPath, relativePath, startLine = 1, limit =
   };
 };
 
+const grepFileStream = (absolutePath, needle, filePath, matches, limit) => new Promise((resolve) => {
+  let settled = false;
+  const finish = () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    resolve();
+  };
+  let stream;
+  try {
+    stream = createReadStream(absolutePath, { encoding: "utf8" });
+  } catch {
+    finish();
+    return;
+  }
+  stream.on("error", finish);
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let lineNo = 0;
+  rl.on("line", (line) => {
+    if (settled) {
+      return;
+    }
+    lineNo += 1;
+    if (line.toLowerCase().includes(needle)) {
+      matches.push({ path: filePath, line: lineNo, text: line.slice(0, 500) });
+      if (matches.length >= limit) {
+        rl.close();
+        stream.destroy();
+        finish();
+      }
+    }
+  });
+  rl.on("close", finish);
+  rl.on("error", finish);
+});
+
 const grepProjectFiles = async (projectPath, query) => {
   const root = await normalizeProjectPath(projectPath);
   const index = await buildProjectIndex(root);
@@ -478,22 +517,28 @@ const grepProjectFiles = async (projectPath, query) => {
     return { query, matches: [] };
   }
   const matches = [];
-  for (const file of index.files.filter((entry) => entry.indexed)) {
+  const targets = index.files.filter((entry) => textExtensions.has(entry.extension) && !isSecretPath(entry.path));
+  for (const file of targets) {
     if (matches.length >= maxGrepMatches) {
       break;
     }
-    try {
-      const content = await fs.readFile(path.join(root, file.path), "utf8");
-      const lines = content.split(/\r?\n/);
-      for (let index = 0; index < lines.length; index += 1) {
-        if (lines[index].toLowerCase().includes(needle)) {
-          matches.push({ path: file.path, line: index + 1, text: lines[index].slice(0, 500) });
-          if (matches.length >= maxGrepMatches) {
-            break;
+    const absolute = path.join(root, file.path);
+    if (file.size <= maxIndexFileBytes) {
+      try {
+        const content = await fs.readFile(absolute, "utf8");
+        const lines = content.split(/\r?\n/);
+        for (let line = 0; line < lines.length; line += 1) {
+          if (lines[line].toLowerCase().includes(needle)) {
+            matches.push({ path: file.path, line: line + 1, text: lines[line].slice(0, 500) });
+            if (matches.length >= maxGrepMatches) {
+              break;
+            }
           }
         }
+      } catch {
       }
-    } catch {
+    } else {
+      await grepFileStream(absolute, needle, file.path, matches, maxGrepMatches);
     }
   }
   return { query, matches };
@@ -612,7 +657,7 @@ const toolSpecs = [
     type: "function",
     function: {
       name: "grep_files",
-      description: "Search indexed text files for a literal query.",
+      description: "Search the project's text files for a literal substring, case-insensitive. Searches every text file including very large ones (megathreads, dumps, logs), not just small indexed ones.",
       parameters: {
         type: "object",
         properties: { query: { type: "string" } },
@@ -1593,16 +1638,74 @@ const streamOpenRouter = async (settings, body, onEvent, signal) => {
   return message;
 };
 
-const verifyGoal = async (settings, goal, submitted, index, projectPath) => {
-  const system = "You are a strict, skeptical verifier for a coding agent. Given the GOAL, the agent's SUBMITTED result, and the actual CHANGED FILE CONTENTS, decide whether the goal is really achieved by inspecting the code. Default to not done if the code does not clearly satisfy the goal. Answer with JSON only: {\"done\": true|false, \"feedback\": \"<short, what is missing or confirmation>\", \"issues\": [\"...\"]}";
+const digestMessageText = (content) => {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content.map((part) => (part && part.type === "text" ? part.text : `[${(part && part.type) || "part"}]`)).join(" ");
+  }
+  return String(content || "");
+};
+
+const buildConversationDigest = (messages, budget) => {
+  const lines = [];
+  for (const m of (messages || []).slice(1)) {
+    if (m.role === "user") {
+      const text = digestMessageText(m.content).trim();
+      if (text) {
+        lines.push(`USER: ${text.slice(0, 8000)}`);
+      }
+    } else if (m.role === "assistant") {
+      const text = digestMessageText(m.content).trim();
+      const parts = [];
+      if (text) {
+        parts.push(`ASSISTANT: ${text.slice(0, 8000)}`);
+      }
+      if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+        const calls = m.tool_calls.map((c) => `${(c.function && c.function.name) || "tool"}(${String((c.function && c.function.arguments) || "").slice(0, 800)})`).join(", ");
+        parts.push(`${text ? "" : "ASSISTANT "}called: ${calls}`);
+      }
+      if (parts.length) {
+        lines.push(parts.join("\n"));
+      }
+    } else if (m.role === "tool") {
+      lines.push(`TOOL RESULT: ${String(m.content || "").slice(0, 4000)}`);
+    }
+  }
+  const joined = lines.join("\n\n");
+  return joined.length > budget ? joined.slice(joined.length - budget) : joined;
+};
+
+const collectWrittenFiles = (toolEvents) => {
+  const out = [];
+  for (const t of (toolEvents || [])) {
+    if ((t.name === "write_file" || t.name === "replace_in_file") && t.result && t.result.written && t.result.path) {
+      out.push(t.result.path);
+    }
+  }
+  return out;
+};
+
+const verifyGoal = async (settings, goal, submitted, index, projectPath, conversation, writtenFiles) => {
+  const system = "You are a strict, skeptical verifier for a coding and automation agent working toward a GOAL. You are given the GOAL, the full CONVERSATION so far (the user's messages, the agent's own messages, and every tool result, including MCP tools such as CheatEngine or IDA), the agent's SUBMITTED result, and the actual CONTENTS of any files the agent created or changed. Decide whether the goal is really achieved by inspecting the concrete evidence: file contents for goals that produce or edit code, and the tool results plus the conversation for analysis or reverse-engineering goals that do not change any files. Judge what was actually done, not what the agent claims. Mark it not done only when the evidence does not clearly satisfy the goal. Answer with JSON only, no prose before or after: {\"done\": true|false, \"feedback\": \"<short: what is missing, or a confirmation>\", \"issues\": [\"...\"]}";
   const fileList = (index.files || []).slice(0, 200).map((item) => item.path).join("\n");
+  const wanted = [];
+  const seen = new Set();
+  for (const rel of [...(Array.isArray(writtenFiles) ? writtenFiles : []), ...(Array.isArray(submitted?.changedFiles) ? submitted.changedFiles : [])]) {
+    const key = String(rel || "").replaceAll("\\", "/").toLowerCase();
+    if (rel && !seen.has(key)) {
+      seen.add(key);
+      wanted.push(rel);
+    }
+  }
+  const changed = wanted.slice(0, 20);
   let changedContent = "";
-  const changed = Array.isArray(submitted?.changedFiles) ? submitted.changedFiles.slice(0, 12) : [];
-  const verifyTotalBudget = 60000;
+  const verifyTotalBudget = 200000;
   const verifyPerFileBudget = Math.min(verifyTotalBudget, Math.max(8000, Math.floor(verifyTotalBudget / Math.max(1, changed.length))));
   for (const rel of changed) {
     try {
-      const file = await readProjectFile(projectPath, rel, 1, 4000);
+      const file = await readProjectFile(projectPath, rel, 1, 8000);
       let body = file.content;
       let note = "";
       if (body.length > verifyPerFileBudget) {
@@ -1612,21 +1715,25 @@ const verifyGoal = async (settings, goal, submitted, index, projectPath) => {
       changedContent += `\n\n=== ${file.path} (totalLines=${file.totalLines}) ===\n${body}${note}`;
     } catch {}
   }
-  const user = `GOAL:\n${goal}\n\nAGENT SUBMITTED:\n${JSON.stringify(submitted || {}).slice(0, 3000)}\n\nCHANGED FILE CONTENTS:${changedContent.slice(0, 60000) || " (agent reported no changed files, likely incomplete)"}\n\nALL PROJECT FILES:\n${fileList}\n\nProject summary: ${index.summary}`;
+  const convoBlock = conversation ? `\n\nCONVERSATION SO FAR (oldest first; the user's messages, the agent's messages, and every tool result):\n${conversation}` : "";
+  const filesBlock = changedContent.slice(0, verifyTotalBudget) || " (the agent reported no changed files; for an analysis or reverse-engineering goal that is expected, so judge from the conversation and tool results above)";
+  const user = `GOAL:\n${goal}${convoBlock}\n\nAGENT SUBMITTED:\n${JSON.stringify(submitted || {}).slice(0, 4000)}\n\nCHANGED FILE CONTENTS:${filesBlock}\n\nALL PROJECT FILES:\n${fileList}\n\nProject summary: ${index.summary}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25000);
+  const timer = setTimeout(() => controller.abort(), 90000);
   try {
     const data = await fetchOpenRouter(settings, {
       model: "deepseek/deepseek-v4-pro",
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       temperature: 0,
-      max_tokens: 600,
       provider: { order: ["DeepSeek"], allow_fallbacks: false },
     }, controller.signal);
-    const raw = data.choices?.[0]?.message?.content || "";
+    const raw = String(data.choices?.[0]?.message?.content || "");
     const found = raw.match(/\{[\s\S]*\}/);
+    if (!found && !raw.trim()) {
+      return { done: false, feedback: "The verifier returned an empty response, so the goal is not yet confirmed. Keep working and call submit_result again.", issues: [] };
+    }
     const parsed = JSON.parse(found ? found[0] : raw);
-    return { done: Boolean(parsed.done), feedback: String(parsed.feedback || "").slice(0, 500), issues: Array.isArray(parsed.issues) ? parsed.issues.slice(0, 10).map((item) => String(item)) : [] };
+    return { done: Boolean(parsed.done), feedback: String(parsed.feedback || "").slice(0, 800), issues: Array.isArray(parsed.issues) ? parsed.issues.slice(0, 10).map((item) => String(item)) : [] };
   } catch (error) {
     return { done: false, feedback: "Verifier unavailable: " + error.message, issues: [] };
   } finally {
@@ -1669,10 +1776,11 @@ const runAgentStream = async (payload, sender) => {
   const tools = [];
   commandCount = 0;
   let finalText = "";
-  const goalActive = Boolean(payload.goalMode && payload.goal);
+  const goalActive = Boolean(payload.goalMode && payload.goal && !payload.planMode);
   let goalRound = 0;
   while (true) {
     let submitted = null;
+    let planPresented = false;
     for (let round = 0; round < maxToolRounds; round += 1) {
       const model = payload.model;
       const body = {
@@ -1773,12 +1881,15 @@ const runAgentStream = async (payload, sender) => {
         if (call.function.name === "submit_result" && result?.submitted) {
           submitted = result.submitted;
         }
+        if (payload.planMode && call.function.name === "present_plan" && result?.plan) {
+          planPresented = true;
+        }
         const toolEvent = { id: call.id, name: call.function.name, args: callArgs, result };
         tools.push(toolEvent);
         emit({ type: "tool", tool: toolEvent });
         messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 2000000) });
       }
-      if (submitted) {
+      if (submitted || planPresented) {
         break;
       }
     }
@@ -1786,7 +1897,9 @@ const runAgentStream = async (payload, sender) => {
       break;
     }
     goalRound += 1;
-    const verdict = await verifyGoal(settings, payload.goal, submitted, index, projectPath);
+    const conversation = buildConversationDigest(messages, 300000);
+    const writtenFiles = collectWrittenFiles(tools);
+    const verdict = await verifyGoal(settings, payload.goal, submitted, index, projectPath, conversation, writtenFiles);
     const verifyEvent = { id: `verify-${goalRound}`, name: "verify_goal", args: {}, result: { verifier: verdict } };
     tools.push(verifyEvent);
     emit({ type: "tool", tool: verifyEvent });
@@ -1796,7 +1909,8 @@ const runAgentStream = async (payload, sender) => {
     }
     messages.push({ role: "user", content: `The goal is NOT done yet according to the verifier. Feedback: ${verdict.feedback}. Issues: ${(verdict.issues || []).join("; ")}. Keep working, fix these, then call submit_result again when done.` });
   }
-  const fallback = controller.signal.aborted ? finalText : (finalText || "Tool budget reached before a final answer.");
+  const planWasPresented = tools.some((t) => t.name === "present_plan" && t.result?.plan);
+  const fallback = controller.signal.aborted ? finalText : (finalText || (planWasPresented ? "" : "Tool budget reached before a final answer."));
   emit({ type: "done", content: fallback, tools });
   return { content: fallback, tools };
 };
@@ -2281,6 +2395,22 @@ ipcMain.handle("window:maximize", () => {
   mainWindow.maximize();
 });
 ipcMain.handle("window:close", () => mainWindow?.close());
+ipcMain.handle("window:zoom", (_, delta) => {
+  if (!mainWindow) {
+    return;
+  }
+  const wc = mainWindow.webContents;
+  if (delta === 0) {
+    wc.setZoomLevel(0);
+    return;
+  }
+  wc.setZoomLevel(Math.max(-3, Math.min(5, wc.getZoomLevel() + delta)));
+});
+ipcMain.handle("window:fullscreen", () => {
+  if (mainWindow) {
+    mainWindow.setFullScreen(!mainWindow.isFullScreen());
+  }
+});
 ipcMain.handle("shell:open-external", (_, url) => {
   openExternalUrl(url);
   return true;

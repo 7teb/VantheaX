@@ -36,5 +36,7 @@ contextBridge.exposeInMainWorld("agentApi", {
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   maximizeWindow: () => ipcRenderer.invoke("window:maximize"),
   closeWindow: () => ipcRenderer.invoke("window:close"),
+  zoomWindow: (delta) => ipcRenderer.invoke("window:zoom", delta),
+  toggleFullscreen: () => ipcRenderer.invoke("window:fullscreen"),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
 });
