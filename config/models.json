@@ -22,6 +22,17 @@
     "maxOutput": 384000
   },
   {
+    "id": "z-ai/glm-5.2",
+    "label": "GLM 5.2",
+    "provider": "Z.ai",
+    "providerKey": "zai",
+    "efforts": ["high", "xhigh"],
+    "defaultEffort": "high",
+    "supportsVision": false,
+    "contextLength": 1048576,
+    "maxOutput": 131072
+  },
+  {
     "id": "qwen/qwen3.7-plus",
     "label": "Qwen 3.7 Plus",
     "provider": "Qwen",

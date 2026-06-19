@@ -1,44 +1,52 @@
 # VantheaX
 
-Private local Electron code agent for Windows.
+A private, local code agent for Windows. A desktop app (Electron + React) that talks to coding models through OpenRouter and can read, edit, and run things inside a project folder you point it at.
+
+## Requirements
+
+- Windows
+- Node.js 20 or newer (tested on 24)
+- An OpenRouter API key: https://openrouter.ai/keys
+
+## Setup
+
+```powershell
+git clone https://github.com/7yariz/VantheaX.git
+cd VantheaX
+npm install
+```
 
 ## Run
 
-```powershell
-npm.cmd install
-npm.cmd run build
-npm.cmd start
-```
-
-## Package
+Dev mode (hot reload):
 
 ```powershell
-npm.cmd run package
+npm run dev
 ```
 
-The unpacked Windows app is written to:
+Or build a standalone Windows app:
 
-```text
-outputs\electron\win-unpacked\VantheaX.exe
+```powershell
+npm run dist
 ```
 
-## Features
+That produces an installer under `outputs\`. For a portable build instead, run `npm run package` and launch `outputs\electron\win-unpacked\VantheaX.exe`.
 
-- Electron desktop shell.
-- React and Vite renderer.
-- Dark Vanthea-style UI.
-- UI language switch (English / German) in settings — UI-only, never sent to the model.
-- Live OpenRouter key balance in settings (remaining of the key's spend limit).
-- Default AppData workspace when no project is open, so the agent is never scoped to the app folder.
-- Local project selection.
-- File index and preview.
-- Local chat persistence and chat search overlay.
-- Markdown rendering with code highlighting, tables, and KaTeX math.
-- OpenRouter model picker.
-- DeepSeek effort picker.
-- Three permission modes (Ask / Auto / Full auto), with a Gemini classifier escalating the grey zone in Auto.
-- Image attachment architecture with model vision gating.
-- Local tools for reading, searching, outlining, writing/editing files, and running guarded commands.
-- Path-scoped file writes/edits (`write_file` / `replace_in_file`), atomic and secret-blocked.
-- Plan mode (read-only → approval card) and Goal mode (works toward a goal, verified by a second model).
-- Secure local OpenRouter key storage through Electron safe storage.
+## First start
+
+1. Open Settings (gear icon).
+2. Paste your OpenRouter API key. It is stored locally through Electron safe storage and only ever leaves your machine to call OpenRouter.
+3. Pick a model (DeepSeek, Z.ai GLM, or Qwen) and choose a project folder.
+
+## What it does
+
+- Reads, searches, outlines, edits, and writes files in the selected project.
+- Runs commands with three permission modes (Ask / Auto / Full), with a safety classifier gating the grey zone in Auto.
+- Plan mode (read-only, presents a plan for approval) and Goal mode (works toward a goal, checked by a second model).
+- Markdown with code highlighting, tables, and math; local chat history and search.
+- MCP support for connecting local tool servers.
+
+## Notes
+
+- Your API key, settings, and chats live in `%APPDATA%\VantheaX\` and are never part of the repo.
+- Provider routing is pinned per model (for example, GLM runs only on the first-party Z.ai provider).
