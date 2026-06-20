@@ -1523,12 +1523,72 @@ const sanitizeErrorText = (settings, text) => {
   return String(text || "").replaceAll(key, "[redacted]");
 };
 
+const sleep = (ms, signal) => new Promise((resolve) => {
+  if (signal?.aborted) {
+    resolve();
+    return;
+  }
+  const cleanup = () => {
+    clearTimeout(timer);
+    signal?.removeEventListener?.("abort", onAbort);
+  };
+  const onAbort = () => {
+    cleanup();
+    resolve();
+  };
+  const timer = setTimeout(() => {
+    cleanup();
+    resolve();
+  }, ms);
+  signal?.addEventListener?.("abort", onAbort, { once: true });
+});
+
+const backoffDelay = (attempt) => Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
+
+const retryableHttpStatus = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+const isRetryableFetchError = (error) => {
+  if (!error || error.name === "AbortError") {
+    return false;
+  }
+  const msg = String(error.message || "").toLowerCase();
+  if (msg.includes("fetch failed") || msg.includes("terminated") || msg.includes("socket hang up") || msg.includes("other side closed") || msg.includes("network")) {
+    return true;
+  }
+  const code = String(error.cause?.code || error.code || "");
+  return ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE", "EAI_AGAIN", "ENETUNREACH", "ENETDOWN", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT"].includes(code);
+};
+
+const fetchWithRetry = async (url, options, { retries = 3, signal } = {}) => {
+  for (let attempt = 0; ; attempt += 1) {
+    if (signal?.aborted) {
+      const aborted = new Error("The operation was aborted");
+      aborted.name = "AbortError";
+      throw aborted;
+    }
+    try {
+      const response = await fetch(url, options);
+      if (retryableHttpStatus.has(response.status) && attempt < retries) {
+        try { await response.body?.cancel(); } catch {}
+        await sleep(backoffDelay(attempt), signal);
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (signal?.aborted || error?.name === "AbortError" || attempt >= retries || !isRetryableFetchError(error)) {
+        throw error;
+      }
+      await sleep(backoffDelay(attempt), signal);
+    }
+  }
+};
+
 const fetchOpenRouter = async (settings, body, signal) => {
   const key = decryptText(settings.openRouterKey);
   if (!key) {
     throw new Error("OpenRouter API key is missing");
   }
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${key}`,
@@ -1538,7 +1598,7 @@ const fetchOpenRouter = async (settings, body, signal) => {
     },
     body: JSON.stringify({ ...body, messages: sanitizeMessages(body.messages) }),
     signal,
-  });
+  }, { retries: 3, signal });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`OpenRouter ${response.status}: ${sanitizeErrorText(settings, text).slice(0, 800)}`);
@@ -1643,7 +1703,7 @@ const streamOpenRouter = async (settings, body, onEvent, signal) => {
   if (!key) {
     throw new Error("OpenRouter API key is missing");
   }
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${key}`,
@@ -1653,7 +1713,7 @@ const streamOpenRouter = async (settings, body, onEvent, signal) => {
     },
     body: JSON.stringify({ ...body, messages: sanitizeMessages(body.messages), stream: true }),
     signal,
-  });
+  }, { retries: 3, signal });
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`OpenRouter ${response.status}: ${sanitizeErrorText(settings, text).slice(0, 800)}`);
@@ -1929,6 +1989,9 @@ const runAgentStream = async (payload, sender) => {
         const m = String(error?.message || "");
         if (/\b400\b/.test(m) && /context|token|maximum|too long|length/i.test(m)) {
           throw new Error(`The conversation grew too large for the model's context window during this turn. Use the Compact button or start a new chat. (${m.slice(0, 240)})`);
+        }
+        if (isRetryableFetchError(error)) {
+          throw new Error(`Lost the connection to OpenRouter (network error) and automatic retries failed. Check your internet, VPN, or firewall and try again. (${m.slice(0, 180)})`);
         }
         throw error;
       }
