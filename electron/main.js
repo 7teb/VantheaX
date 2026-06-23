@@ -102,7 +102,7 @@ const resolveInsideProject = async (projectPath, relativePath = ".") => {
   const target = await fs.realpath(requested);
   const relative = path.relative(root, target);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("Path is outside the project");
+    throw new Error("Path is outside the project. The read_file/list_files/grep_files tools only see the open project. If you genuinely need a file OUTSIDE the project, read it with run_command using PowerShell instead, for example: Get-Content -Raw '<absolute path>' (or add -TotalCount 200 for just the first lines).");
   }
   return { root, target, relative: relative || "." };
 };
@@ -590,11 +590,13 @@ const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData) =>
   const timeout = Math.min(maxCommandTimeout, Math.max(1000, Number(timeoutMs) || defaultCommandTimeout));
   const started = Date.now();
   return await new Promise((resolve) => {
-    const child = spawn("powershell.exe", ["-NoProfile", "-Command", command], {
+    const child = spawn("powershell.exe", ["-NoProfile", "-Command", `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ${command}`], {
       cwd: target,
       windowsHide: true,
       shell: false,
     });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
     let stdout = "";
     let stderr = "";
     let lastEmit = 0;

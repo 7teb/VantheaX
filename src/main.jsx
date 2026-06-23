@@ -472,6 +472,14 @@ const activeChatKey = "vantheax:active-chat";
 const BOTTOM_STICK_PX = 100;
 
 let stickRaf = 0;
+let isAutoScrolling = false;
+const autoScroll = (el) => {
+  isAutoScrolling = true;
+  el.scrollTop = el.scrollHeight;
+  requestAnimationFrame(() => {
+    isAutoScrolling = false;
+  });
+};
 const stickMessagesToBottom = () => {
   if (stickRaf) {
     return;
@@ -480,7 +488,7 @@ const stickMessagesToBottom = () => {
     stickRaf = 0;
     const el = document.querySelector(".messages");
     if (el) {
-      el.scrollTop = el.scrollHeight;
+      autoScroll(el);
     }
   });
 };
@@ -491,13 +499,13 @@ const animateDetails = (details, opening) => {
   if (!summary) {
     return;
   }
+  const startHeight = parseFloat(getComputedStyle(details).height) || details.offsetHeight;
   const prev = detailsAnims.get(details);
   if (prev) {
     prev.cancel();
   }
   const scroller = document.querySelector(".messages");
   const followBottom = opening && scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < BOTTOM_STICK_PX;
-  const startHeight = details.offsetHeight;
   details.style.overflow = "hidden";
   if (opening) {
     details.open = true;
@@ -511,7 +519,7 @@ const animateDetails = (details, opening) => {
   if (followBottom) {
     const follow = () => {
       if (anim.playState === "running") {
-        scroller.scrollTop = scroller.scrollHeight;
+        autoScroll(scroller);
         requestAnimationFrame(follow);
       }
     };
@@ -527,7 +535,7 @@ const animateDetails = (details, opening) => {
       details.open = false;
     }
     if (followBottom) {
-      scroller.scrollTop = scroller.scrollHeight;
+      autoScroll(scroller);
     }
     cleanup();
   };
@@ -828,6 +836,8 @@ const App = () => {
         setChatMenuOpen(false);
         setContextOrbOpen(false);
         setTitleMenuOpen(null);
+        setInspectorOpen(false);
+        setEditingMessageId("");
       }
     };
     window.addEventListener("keydown", close);
@@ -1037,6 +1047,9 @@ const App = () => {
   };
 
   const onMessagesScroll = () => {
+    if (isAutoScrolling) {
+      return;
+    }
     const el = messagesRef.current;
     if (el) {
       atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_STICK_PX;
@@ -1061,10 +1074,14 @@ const App = () => {
         return;
       }
       event.preventDefault();
-      if (details.classList.contains("is-working")) {
+      if (details.classList.contains("is-working") || detailsAnims.has(details)) {
         return;
       }
       details.dataset.touched = "1";
+      const worklog = summary.closest(".worklog");
+      if (worklog) {
+        worklog.dataset.touched = "1";
+      }
       animateDetails(details, !details.open);
     };
     document.addEventListener("click", onClick);
@@ -1090,6 +1107,8 @@ const App = () => {
     setGoalText("");
     setTodos([]);
     setGoalDone(false);
+    setPlanMode(false);
+    setGoalMode(false);
   };
 
   const navigateChat = (dir) => {
@@ -2687,21 +2706,22 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
       </summary>
       <div className="worklog-body">
         {blocks.map((block, idx) => {
+          const key = block.tool?.id || block.tools?.[0]?.id || `text-${idx}`;
           if (block.kind === "text") {
-            return <div className="narration markdown" key={idx}><MarkdownMessage content={block.content} /></div>;
+            return <div className="narration markdown" key={key}><MarkdownMessage content={block.content} /></div>;
           }
           if (block.kind === "edits") {
-            return <EditGroup tools={block.tools} key={idx} />;
+            return <EditGroup tools={block.tools} key={key} />;
           }
           if (block.kind === "commands" || block.kind === "reads") {
             return block.tools.length === 1
-              ? <ToolStep tool={block.tools[0]} key={idx} />
-              : <CommandGroup tools={block.tools} kind={block.kind} key={idx} />;
+              ? <ToolStep tool={block.tools[0]} key={key} />
+              : <CommandGroup tools={block.tools} kind={block.kind} key={key} />;
           }
           if (block.kind === "todos") {
-            return <TodoStep tool={block.tool} key={idx} />;
+            return <TodoStep tool={block.tool} key={key} />;
           }
-          return <ToolStep tool={block.tool} key={idx} />;
+          return <ToolStep tool={block.tool} key={key} />;
         })}
         {liveTool && <LiveToolStep tool={liveTool} />}
       </div>
