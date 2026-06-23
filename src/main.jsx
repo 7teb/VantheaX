@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, X } from "lucide-react";
 import MarkdownMessage from "./Markdown.jsx";
@@ -118,6 +118,8 @@ const STRINGS = {
     "timeline.done": "Done",
     "toollabel.running": "Running {x}",
     "toollabel.runCmd": "Run {x}",
+    "toollabel.runShell": "Running PowerShell",
+    "toollabel.runShellAsk": "Run PowerShell command",
     "toollabel.denied": "Denied {x}",
     "toollabel.grepping": "Searching {x}",
     "grep.matches": "{n} matches",
@@ -336,6 +338,8 @@ const STRINGS = {
     "timeline.done": "Fertig",
     "toollabel.running": "Führt {x} aus",
     "toollabel.runCmd": "{x} ausführen",
+    "toollabel.runShell": "PowerShell läuft",
+    "toollabel.runShellAsk": "PowerShell-Befehl ausführen",
     "toollabel.denied": "{x} abgelehnt",
     "toollabel.grepping": "Sucht {x}",
     "grep.matches": "{n} Treffer",
@@ -466,6 +470,69 @@ const api = window.agentApi;
 const chatsKey = "vantheax:chats";
 const activeChatKey = "vantheax:active-chat";
 const BOTTOM_STICK_PX = 100;
+
+let stickRaf = 0;
+const stickMessagesToBottom = () => {
+  if (stickRaf) {
+    return;
+  }
+  stickRaf = requestAnimationFrame(() => {
+    stickRaf = 0;
+    const el = document.querySelector(".messages");
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+};
+
+const detailsAnims = new WeakMap();
+const animateDetails = (details, opening) => {
+  const summary = details.querySelector("summary");
+  if (!summary) {
+    return;
+  }
+  const prev = detailsAnims.get(details);
+  if (prev) {
+    prev.cancel();
+  }
+  const scroller = document.querySelector(".messages");
+  const followBottom = opening && scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < BOTTOM_STICK_PX;
+  const startHeight = details.offsetHeight;
+  details.style.overflow = "hidden";
+  if (opening) {
+    details.open = true;
+  }
+  const endHeight = opening ? details.offsetHeight : summary.offsetHeight;
+  const anim = details.animate(
+    { height: [`${startHeight}px`, `${endHeight}px`] },
+    { duration: 240, easing: "cubic-bezier(.22, .72, .22, 1)" },
+  );
+  detailsAnims.set(details, anim);
+  if (followBottom) {
+    const follow = () => {
+      if (anim.playState === "running") {
+        scroller.scrollTop = scroller.scrollHeight;
+        requestAnimationFrame(follow);
+      }
+    };
+    requestAnimationFrame(follow);
+  }
+  const cleanup = () => {
+    details.style.height = "";
+    details.style.overflow = "";
+    detailsAnims.delete(details);
+  };
+  anim.onfinish = () => {
+    if (!opening) {
+      details.open = false;
+    }
+    if (followBottom) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+    cleanup();
+  };
+  anim.oncancel = cleanup;
+};
 
 const emptyIndex = {
   root: "",
@@ -977,11 +1044,32 @@ const App = () => {
   };
 
   useEffect(() => {
-    const el = messagesRef.current;
-    if (el && atBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
+    if (atBottomRef.current) {
+      stickMessagesToBottom();
     }
   }, [messages]);
+
+  useEffect(() => {
+    const ANIMATABLE = ".tool-step, .edit-group, .edit-file, .cluster-row, .cmd-group, .tool-card, .worklog";
+    const onClick = (event) => {
+      const summary = event.target.closest("summary");
+      if (!summary) {
+        return;
+      }
+      const details = summary.parentElement;
+      if (!(details instanceof HTMLDetailsElement) || !details.matches(ANIMATABLE)) {
+        return;
+      }
+      event.preventDefault();
+      if (details.classList.contains("is-working")) {
+        return;
+      }
+      details.dataset.touched = "1";
+      animateDetails(details, !details.open);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, []);
 
   useEffect(() => {
     if (resendText != null && !busy) {
@@ -1271,6 +1359,7 @@ const App = () => {
       updateChats((current) => [chat, ...current]);
       setActiveChatId(chat.id);
     }
+    atBottomRef.current = true;
     const assistantId = crypto.randomUUID();
     const userMessage = {
       id: crypto.randomUUID(),
@@ -2261,7 +2350,7 @@ const Typewriter = ({ text, animate }) => {
     }
     const scroller = document.querySelector(".messages");
     if (scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < BOTTOM_STICK_PX) {
-      scroller.scrollTop = scroller.scrollHeight;
+      stickMessagesToBottom();
     }
   }, [shown, animate]);
   return <MarkdownMessage content={text.slice(0, shown)} />;
@@ -2572,22 +2661,29 @@ const TodoStep = ({ tool }) => {
 };
 
 const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
-  const [open, setOpen] = useState(working);
-  const touchedRef = useRef(false);
-  useEffect(() => {
-    if (!working && !touchedRef.current) {
-      setOpen(false);
-    }
-  }, [working]);
+  const detailsRef = useRef(null);
+  const wasWorking = useRef(false);
   const elapsed = useElapsedSeconds(startedAt, working);
   const blocks = groupWorkSegments(segments);
+  useLayoutEffect(() => {
+    const el = detailsRef.current;
+    if (!el) {
+      return;
+    }
+    if (working) {
+      el.open = true;
+    } else if (wasWorking.current && el.open && el.dataset.touched !== "1") {
+      animateDetails(el, false);
+    }
+    wasWorking.current = working;
+  }, [working]);
   return (
-    <details className="worklog" open={working ? true : open}>
-      <summary className={working ? "worklog-head is-working" : "worklog-head"} onClick={(event) => { event.preventDefault(); if (working) { return; } touchedRef.current = true; setOpen(!open); }}>
+    <details ref={detailsRef} className={working ? "worklog is-working" : "worklog"}>
+      <summary className={working ? "worklog-head is-working" : "worklog-head"}>
         {working
           ? <span className="live-label" data-shimmer-label={t("work.workingSince", { s: elapsed })}>{t("work.workingSince", { s: elapsed })}</span>
           : <span>{t("work.worked", { time: formatWorkTime(workMs) })}</span>}
-        {!working && <ChevronRight size={14} className={`worklog-chevron ${open ? "open" : ""}`} />}
+        {!working && <ChevronRight size={14} className="worklog-chevron" />}
       </summary>
       <div className="worklog-body">
         {blocks.map((block, idx) => {
@@ -2776,10 +2872,11 @@ const getToolLabel = (tool) => {
     return t("toollabel.denied", { x: command || path || tool.name || "" });
   }
   if (command) {
+    const compact = command.includes("\n") || command.length > 64;
     if (result.permissionRequired) {
-      return t("toollabel.runCmd", { x: command });
+      return compact ? t("toollabel.runShellAsk") : t("toollabel.runCmd", { x: command });
     }
-    return t("toollabel.running", { x: command });
+    return compact ? t("toollabel.runShell") : t("toollabel.running", { x: command });
   }
   if (name.includes("grep") || name.includes("search")) {
     return t("toollabel.grepping", { x: tool.args?.query || result.query || "" });

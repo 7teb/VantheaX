@@ -108,6 +108,11 @@ textarea {
   align-items: center;
   height: 36px;
   background: #2B2B2B;
+  -webkit-app-region: drag;
+}
+
+.titlebar button,
+.titlebar .titlebar-dropdown {
   -webkit-app-region: no-drag;
 }
 
@@ -122,7 +127,7 @@ textarea {
   gap: 4px;
   min-width: 0;
   padding-left: 8px;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .chrome-button {
@@ -237,7 +242,7 @@ textarea {
   gap: 2px;
   padding-right: 8px;
   justify-content: flex-end;
-  -webkit-app-region: no-drag;
+  -webkit-app-region: drag;
 }
 
 .titlebar-actions button {
@@ -2168,6 +2173,16 @@ textarea {
   font-size: 12.5px;
 }
 
+.tool-command {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(255, 255, 255, .12);
+}
+
 .run-inline {
   display: inline-flex;
   align-items: center;
@@ -2226,7 +2241,7 @@ textarea {
   transition: transform .2s ease;
 }
 
-.worklog-chevron.open {
+.worklog[open] .worklog-chevron {
   transform: rotate(90deg);
 }
 
@@ -2602,34 +2617,6 @@ textarea {
   color: #ff9a9a;
 }
 
-html {
-  interpolate-size: allow-keywords;
-}
-
-.worklog::details-content,
-.edit-group::details-content,
-.cmd-group::details-content,
-.cluster-row::details-content,
-.edit-file::details-content,
-.tool-step::details-content,
-.tool-card::details-content {
-  overflow: hidden;
-  block-size: 0;
-  content-visibility: hidden;
-  transition: content-visibility .3s allow-discrete, block-size .3s cubic-bezier(.22, .72, .22, 1);
-}
-
-.worklog[open]::details-content,
-.edit-group[open]::details-content,
-.cmd-group[open]::details-content,
-.cluster-row[open]::details-content,
-.edit-file[open]::details-content,
-.tool-step[open]::details-content,
-.tool-card[open]::details-content {
-  block-size: auto;
-  content-visibility: visible;
-}
-
 .worklog[open] > .worklog-body,
 .edit-group[open] > .edit-group-body,
 .edit-file[open] > .diff-view,
@@ -2665,13 +2652,6 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .worklog::details-content,
-  .edit-group::details-content,
-  .edit-file::details-content,
-  .tool-step::details-content,
-  .tool-card::details-content {
-    transition: none;
-  }
   .worklog[open] > .worklog-body,
   .edit-group[open] > .edit-group-body,
   .edit-file[open] > .diff-view,
