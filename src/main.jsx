@@ -157,6 +157,18 @@ const STRINGS = {
     "settings.balance": "Key balance",
     "settings.tabGeneral": "General",
     "settings.tabMcp": "MCP servers",
+    "settings.tabWebSearch": "Web search",
+    "toollabel.webSearch": "Searching the web",
+    "web.enable": "Enable web search",
+    "web.key": "Tavily API key",
+    "web.results": "Results per search",
+    "web.depth": "Search depth",
+    "web.depthBasic": "Basic",
+    "web.depthAdvanced": "Advanced",
+    "web.topic": "Topic",
+    "web.topicGeneral": "General",
+    "web.topicNews": "News",
+    "web.sources": "Sources",
     "settings.mcpName": "Name (a-z, 0-9, _ -)",
     "settings.mcpCommand": "Command (e.g. uvx, python, npx)",
     "settings.mcpArgs": "Arguments (one per line)",
@@ -377,6 +389,18 @@ const STRINGS = {
     "settings.balance": "Key-Guthaben",
     "settings.tabGeneral": "Allgemein",
     "settings.tabMcp": "MCP-Server",
+    "settings.tabWebSearch": "Websuche",
+    "toollabel.webSearch": "Durchsucht das Web",
+    "web.enable": "Websuche aktivieren",
+    "web.key": "Tavily-API-Key",
+    "web.results": "Treffer pro Suche",
+    "web.depth": "Suchtiefe",
+    "web.depthBasic": "Basic",
+    "web.depthAdvanced": "Advanced",
+    "web.topic": "Thema",
+    "web.topicGeneral": "Allgemein",
+    "web.topicNews": "News",
+    "web.sources": "Quellen",
     "settings.mcpName": "Name (a-z, 0-9, _ -)",
     "settings.mcpCommand": "Befehl (z.B. uvx, python, npx)",
     "settings.mcpArgs": "Argumente (eins pro Zeile)",
@@ -687,7 +711,7 @@ const formatRelativeTime = (iso) => {
 };
 
 const App = () => {
-  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [] });
+  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" } });
   const [models, setModels] = useState([]);
   const [projectPath, setProjectPath] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
@@ -1447,6 +1471,7 @@ const App = () => {
         model: settings.model,
         effort: settings.effort,
         mode: settings.mode,
+        webSearchEnabled: Boolean(settings.webSearch?.enabled && settings.hasTavilyKey),
         planMode: effectivePlanMode,
         goalMode,
         goal: effectiveGoal,
@@ -1811,7 +1836,7 @@ const App = () => {
       </div>
 
       {searchOpen && <SearchOverlay chats={searchedChats} query={chatQuery} setQuery={setChatQuery} onClose={() => setSearchOpen(false)} onOpen={openChat} />}
-      {settingsOpen && <SettingsModal hasKey={settings.hasOpenRouterKey} value={keyInput} setValue={setKeyInput} onSave={saveKey} onClose={() => setSettingsOpen(false)} lang={settings.language || "en"} onLang={(value) => persistSettings({ language: value })} />}
+      {settingsOpen && <SettingsModal hasKey={settings.hasOpenRouterKey} value={keyInput} setValue={setKeyInput} onSave={saveKey} onClose={() => setSettingsOpen(false)} lang={settings.language || "en"} onLang={(value) => persistSettings({ language: value })} webSearch={settings.webSearch || { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }} hasTavilyKey={settings.hasTavilyKey} onWebChange={(patch) => persistSettings({ webSearch: patch })} onSaveTavilyKey={(k) => persistSettings({ tavilyKeyPlain: k })} />}
     </div>
   );
 };
@@ -2020,6 +2045,13 @@ const ShieldAlertIcon = ({ size = 24, ...rest }) => (
     <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
     <path d="M12 8v4" />
     <path d="M12 16h.01" />
+  </svg>
+);
+
+const GlobeCheckIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="m15 6 2 2 4-4" />
+    <path d="M2 12h20A10 10 0 1 1 12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 4-10" />
   </svg>
 );
 
@@ -2679,6 +2711,80 @@ const TodoStep = ({ tool }) => {
   );
 };
 
+const linkifyCitations = (text, sources) => {
+  const list = Array.isArray(sources) ? sources : [];
+  const raw = String(text || "");
+  if (!list.length) {
+    return raw;
+  }
+  return raw.replace(/(?<![\w\]\)])\[([\d,\s]+)\]/g, (match, inner) => {
+    const nums = String(inner).split(",").map((part) => part.trim()).filter((part) => /^\d+$/.test(part));
+    if (!nums.length) {
+      return match;
+    }
+    const links = nums.map((num) => {
+      const source = list[Number(num) - 1];
+      if (!source || !source.url) {
+        return null;
+      }
+      let label = String(source.title || source.url).replace(/[\[\]\\<>]/g, "").trim();
+      if (label.length > 42) {
+        label = `${label.slice(0, 42).trim()}…`;
+      }
+      return `[${label || source.url}](<${source.url}>)`;
+    }).filter(Boolean);
+    return links.length ? links.join(", ") : match;
+  });
+};
+
+const WebSearchStep = ({ tool }) => {
+  const result = tool.result || {};
+  const query = result.query || tool.args?.query || "";
+  const urls = Array.isArray(result.urls) ? result.urls : (Array.isArray(tool.args?.urls) ? tool.args.urls : []);
+  const answer = result.answer || "";
+  const sources = Array.isArray(result.sources) ? result.sources : [];
+  const label = t("toollabel.webSearch");
+  if (result.running) {
+    return (
+      <div className="tool-step running web-search-running">
+        <div className="running-head">
+          <span className="step-marker"><GlobeCheckIcon size={14} /></span>
+          <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
+          <span className="running-dots" aria-hidden="true"><i /><i /><i /></span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <details className="tool-step web-search">
+      <summary>
+        <span className="step-marker"><GlobeCheckIcon size={14} /></span>
+        <span className="step-label">{label}</span>
+        <ChevronRight size={13} className="edit-chevron" />
+      </summary>
+      <div className="step-body web-search-body">
+        {Boolean(query) && <div className="web-query">{query}</div>}
+        {urls.length > 0 && <div className="web-query-url">{urls.join("  ")}</div>}
+        <div className="web-sep" />
+        {result.error
+          ? <div className="tool-warning">{result.error}</div>
+          : <div className="web-answer markdown"><MarkdownMessage content={linkifyCitations(answer, sources)} /></div>}
+        {sources.length > 0 && (
+          <div className="web-sources">
+            <div className="web-sources-title">{t("web.sources")}</div>
+            {sources.map((source, index) => (
+              <button key={index} type="button" className="web-source" onClick={() => api.openExternal(source.url)}>
+                <Globe size={13} />
+                <span>{source.title || source.url}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+};
+
 const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
   const detailsRef = useRef(null);
   const wasWorking = useRef(false);
@@ -2720,6 +2826,9 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
           }
           if (block.kind === "todos") {
             return <TodoStep tool={block.tool} key={key} />;
+          }
+          if (block.tool?.name === "web_search") {
+            return <WebSearchStep tool={block.tool} key={key} />;
           }
           return <ToolStep tool={block.tool} key={key} />;
         })}
@@ -2854,6 +2963,9 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
 
 const getToolIcon = (name = "") => {
   const lower = name.toLowerCase();
+  if (lower === "web_search") {
+    return GlobeCheckIcon;
+  }
   if (lower.startsWith("mcp__") || lower === "add_mcp_server") {
     return Plug;
   }
@@ -2880,6 +2992,9 @@ const getToolLabel = (tool) => {
   const command = result.command || tool.args?.command;
   const path = tool.args?.path || tool.args?.file || result.path;
   const name = (tool.name || "").toLowerCase();
+  if (name === "web_search") {
+    return t("toollabel.webSearch");
+  }
   if (name === "add_mcp_server" || result.addMcp) {
     return t("toollabel.addMcp", { x: result.mcpAddName || tool.args?.name || tool.args?.folder || "" });
   }
@@ -3260,7 +3375,57 @@ const McpSettings = () => {
   );
 };
 
-const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang }) => {
+const WebSearchSettings = ({ config, hasKey, onChange, onSaveKey }) => {
+  const cfg = config || { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" };
+  const [keyInput, setKeyInput] = useState("");
+  const save = () => {
+    if (!keyInput.trim()) {
+      return;
+    }
+    onSaveKey(keyInput.trim());
+    setKeyInput("");
+  };
+  const clamped = Math.min(20, Math.max(1, Number(cfg.maxResults) || 5));
+  const pct = Math.round(((clamped - 1) / 19) * 100);
+  const sliderStyle = { background: `linear-gradient(90deg, var(--accent-2) 0 ${pct}%, rgba(255,255,255,.1) ${pct}% 100%)` };
+  return (
+    <div className="web-settings">
+      <div className="modal-title"><GlobeCheckIcon size={19} />{t("settings.tabWebSearch")}</div>
+      <div className="web-row">
+        <span className="web-enable-label">{t("web.enable")}</span>
+        <span className={cfg.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onChange({ enabled: !cfg.enabled })} />
+      </div>
+      <div className="web-field">
+        <label className="field-label">{t("web.key")}</label>
+        <input className="text-input" type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} placeholder={hasKey ? t("settings.stored") : "tvly-..."} />
+        <button type="button" className="web-save" onClick={save}><Check size={16} /><span>{t("settings.saveKey")}</span></button>
+      </div>
+      <div className="web-field">
+        <label className="field-label">{t("web.results")}</label>
+        <div className="web-slider-row">
+          <input className="web-slider" type="range" min="1" max="20" step="1" value={clamped} style={sliderStyle} onChange={(event) => onChange({ maxResults: Number(event.target.value) })} />
+          <span className="web-slider-val">{clamped}</span>
+        </div>
+      </div>
+      <div className="web-row">
+        <span className="field-label">{t("web.depth")}</span>
+        <div className="web-seg">
+          <button type="button" className={cfg.searchDepth === "basic" ? "is-on" : ""} onClick={() => onChange({ searchDepth: "basic" })}>{t("web.depthBasic")}</button>
+          <button type="button" className={cfg.searchDepth === "advanced" ? "is-on" : ""} onClick={() => onChange({ searchDepth: "advanced" })}>{t("web.depthAdvanced")}</button>
+        </div>
+      </div>
+      <div className="web-row">
+        <span className="field-label">{t("web.topic")}</span>
+        <div className="web-seg">
+          <button type="button" className={cfg.topic === "general" ? "is-on" : ""} onClick={() => onChange({ topic: "general" })}>{t("web.topicGeneral")}</button>
+          <button type="button" className={cfg.topic === "news" ? "is-on" : ""} onClick={() => onChange({ topic: "news" })}>{t("web.topicNews")}</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey }) => {
   const [tab, setTab] = useState("general");
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -3268,6 +3433,7 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang 
         <div className="settings-tabs">
           <button className={tab === "general" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("general")}><Settings size={15} /><span>{t("settings.tabGeneral")}</span></button>
           <button className={tab === "mcp" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("mcp")}><Plug size={15} /><span>{t("settings.tabMcp")}</span></button>
+          <button className={tab === "websearch" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("websearch")}><GlobeCheckIcon size={15} /><span>{t("settings.tabWebSearch")}</span></button>
         </div>
         <div className="settings-content">
           {tab === "general" ? (
@@ -3285,11 +3451,13 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang 
               <label className="field-label balance-label">{t("settings.balance")}</label>
               <BalanceLine hasKey={hasKey} />
             </>
-          ) : (
+          ) : tab === "mcp" ? (
             <>
               <div className="modal-title"><Plug size={19} />{t("settings.tabMcp")}</div>
               <McpSettings />
             </>
+          ) : (
+            <WebSearchSettings config={webSearch} hasKey={hasTavilyKey} onChange={onWebChange} onSaveKey={onSaveTavilyKey} />
           )}
         </div>
       </div>
