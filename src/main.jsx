@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import MarkdownMessage from "./Markdown.jsx";
 import "./styles.css";
 
@@ -169,6 +169,12 @@ const STRINGS = {
     "web.topicGeneral": "General",
     "web.topicNews": "News",
     "web.sources": "Sources",
+    "fc.undo": "Undo",
+    "fc.review": "Review",
+    "fc.reverted": "Reverted",
+    "fc.showMore": "Show {n} more …",
+    "fc.showLess": "Show less",
+    "status.reverted": "Reverted changes",
     "settings.mcpName": "Name (a-z, 0-9, _ -)",
     "settings.mcpCommand": "Command (e.g. uvx, python, npx)",
     "settings.mcpArgs": "Arguments (one per line)",
@@ -401,6 +407,12 @@ const STRINGS = {
     "web.topicGeneral": "Allgemein",
     "web.topicNews": "News",
     "web.sources": "Quellen",
+    "fc.undo": "Rückgängig machen",
+    "fc.review": "Überprüfen",
+    "fc.reverted": "Rückgängig gemacht",
+    "fc.showMore": "{n} weitere anzeigen …",
+    "fc.showLess": "Weniger anzeigen",
+    "status.reverted": "Änderungen rückgängig gemacht",
     "settings.mcpName": "Name (a-z, 0-9, _ -)",
     "settings.mcpCommand": "Befehl (z.B. uvx, python, npx)",
     "settings.mcpArgs": "Argumente (eins pro Zeile)",
@@ -597,7 +609,7 @@ const makeChat = (projectPath = "") => ({
 
 const cleanHistory = (messages) => messages
   .filter((message) => message.role === "user" || message.role === "assistant")
-  .map((message) => ({ role: message.role, content: (message.content || "") + (message.cancelled ? "\n\n[The user stopped this response before it finished.]" : "") }))
+  .map((message) => ({ role: message.role, content: (message.content || "") + (message.cancelled ? "\n\n[The user stopped this response before it finished.]" : "") + (message.reverted ? "\n\n[The user reverted the file changes from this turn. Those edits were undone and the files restored to their previous state, so they are no longer applied. Do not assume they still exist; re-read the files if you need their current contents.]" : "") }))
   .filter((message) => message.content.trim());
 
 const collectReadPaths = (messages) => {
@@ -622,6 +634,37 @@ const collectReadPaths = (messages) => {
 
 const COMPACT_THRESHOLD = 0.95;
 const KEEP_RAW_TURNS = 3;
+
+const collectTurnEdits = (message) => {
+  const tools = [];
+  if (Array.isArray(message?.segments)) {
+    for (const seg of message.segments) {
+      if (seg.type === "tool" && seg.tool) {
+        tools.push(seg.tool);
+      }
+    }
+  } else if (Array.isArray(message?.tools)) {
+    tools.push(...message.tools);
+  }
+  const map = new Map();
+  const order = [];
+  for (const tool of tools) {
+    if ((tool.name === "write_file" || tool.name === "replace_in_file") && tool.result?.written) {
+      const filePath = tool.result?.path || tool.args?.path;
+      if (!filePath) {
+        continue;
+      }
+      if (!map.has(filePath)) {
+        map.set(filePath, { path: filePath, added: 0, removed: 0 });
+        order.push(filePath);
+      }
+      const entry = map.get(filePath);
+      entry.added += tool.result?.diff?.added || 0;
+      entry.removed += tool.result?.diff?.removed || 0;
+    }
+  }
+  return order.map((p) => map.get(p));
+};
 
 const collectChangedFiles = (messages) => {
   const seen = new Set();
@@ -1468,6 +1511,7 @@ const App = () => {
         requestId,
         projectPath,
         chatId: chat.id,
+        turnId: assistantId,
         model: settings.model,
         effort: settings.effort,
         mode: settings.mode,
@@ -1605,6 +1649,30 @@ const App = () => {
     } catch (error) {
       setStatus(error.message);
     }
+  };
+
+  const undoTurn = async (message) => {
+    if (!message?.id) {
+      return;
+    }
+    try {
+      const res = await api.undoTurn(message.id);
+      if (res && res.ok) {
+        updateChats((current) => current.map((chat) => chat.id === activeChatId ? { ...chat, messages: chat.messages.map((m) => m.id === message.id ? { ...m, reverted: true } : m) } : chat));
+        if (projectPath) {
+          refreshProject(projectPath);
+        }
+        setStatus(t("status.reverted"));
+      } else {
+        setStatus((res && res.error) || "Undo failed");
+      }
+    } catch (error) {
+      setStatus(error.message);
+    }
+  };
+
+  const revealPath = (relativePath) => {
+    api.revealPath(projectPath, relativePath || "");
   };
 
   return (
@@ -1767,7 +1835,10 @@ const App = () => {
                     onStartEdit={() => startEditMessage(message)}
                     onCancelEdit={cancelEditMessage}
                     onSubmitEdit={(text) => submitEditMessage(message.id, text)}
-                    busy={busy} />
+                    busy={busy}
+                    projectPath={projectPath}
+                    onUndoTurn={undoTurn}
+                    onReveal={revealPath} />
                 </React.Fragment>
               ))}
             </div>
@@ -2052,6 +2123,15 @@ const GlobeCheckIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="m15 6 2 2 4-4" />
     <path d="M2 12h20A10 10 0 1 1 12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 4-10" />
+  </svg>
+);
+
+const FileDiffIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <rect x="4" y="4" width="16" height="16" rx="3" />
+    <path d="M12 8v3" />
+    <path d="M10.5 9.5h3" />
+    <path d="M9 15h6" />
   </svg>
 );
 
@@ -2838,7 +2918,53 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
   );
 };
 
-const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy }) => {
+const FileChangesCard = ({ message, projectPath, onUndo, onReveal }) => {
+  const edits = useMemo(() => collectTurnEdits(message), [message]);
+  const [expanded, setExpanded] = useState(false);
+  if (!edits.length) {
+    return null;
+  }
+  const reverted = Boolean(message.reverted);
+  const totalAdd = edits.reduce((sum, item) => sum + item.added, 0);
+  const totalDel = edits.reduce((sum, item) => sum + item.removed, 0);
+  const title = edits.length === 1 ? t("edit.oneFile") : t("edit.nFiles", { n: edits.length });
+  const collapsible = edits.length > 3;
+  const shown = collapsible && !expanded ? edits.slice(0, 3) : edits;
+  return (
+    <div className={reverted ? "file-changes-card is-reverted" : "file-changes-card"}>
+      <div className="fc-head">
+        <span className="fc-icon"><FileDiffIcon size={16} /></span>
+        <div className="fc-head-main">
+          <span className="fc-title">{title}</span>
+          <span className="fc-stat"><span className="fc-add">+{totalAdd}</span> <span className="fc-del">-{totalDel}</span></span>
+        </div>
+        {reverted ? (
+          <span className="fc-reverted"><Check size={13} />{t("fc.reverted")}</span>
+        ) : (
+          <div className="fc-actions">
+            <button type="button" className="fc-undo" onClick={() => onUndo(message)}><span>{t("fc.undo")}</span><Undo2 size={13} /></button>
+            <button type="button" className="fc-review" onClick={() => onReveal(null)}>{t("fc.review")}</button>
+          </div>
+        )}
+      </div>
+      <div className="fc-files">
+        {shown.map((item) => (
+          <button type="button" className="fc-file" key={item.path} onClick={() => onReveal(item.path)} title={item.path}>
+            <span className="fc-file-name">{item.path}</span>
+            <span className="fc-file-stat"><span className="fc-add">+{item.added}</span> <span className="fc-del">-{item.removed}</span></span>
+          </button>
+        ))}
+        {collapsible && (
+          <button type="button" className="fc-more" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? t("fc.showLess") : t("fc.showMore", { n: edits.length - 3 })}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy, projectPath, onUndoTurn, onReveal }) => {
   const sawWorkingRef = useRef(false);
   const [draft, setDraft] = useState(message.content || "");
   const [copied, setCopied] = useState(false);
@@ -2945,6 +3071,7 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
             : (working
                 ? (!planSeg && <Thinking />)
                 : (Boolean((message.content || "").trim()) && <div className="message-text markdown"><Typewriter key={message.id} text={message.content} animate={sawWorkingRef.current} /></div>))}
+          {!working && <FileChangesCard message={message} projectPath={projectPath} onUndo={onUndoTurn} onReveal={onReveal} />}
         </div>
       </div>
     );
