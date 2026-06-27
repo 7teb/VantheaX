@@ -1460,14 +1460,18 @@ textarea {
 .composer {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-rows: minmax(38px, auto) auto;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   margin: 0 0 7px;
   border: 0;
   border-radius: 16px;
   background: #2B2B2B;
   transition: background .18s ease;
+}
+
+.composer-attachment {
+  padding: 10px 12px 2px;
 }
 
 .composer textarea {
@@ -3945,6 +3949,234 @@ textarea {
 .web-seg button.is-on {
   background: rgba(255, 255, 255, .09);
   color: var(--text);
+}
+
+.perso-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.perso-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #1E1D1C;
+  border: 1px solid #2e2a27;
+}
+
+.perso-row-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.perso-row-sub {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.perso-dd {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.perso-dd-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 220px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid #34302c;
+  background: #2B2B2B;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s ease;
+}
+
+.perso-dd-trigger:hover,
+.perso-dd-trigger.is-open {
+  border-color: #45403b;
+}
+
+.perso-dd-trigger svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.perso-dd-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 300px;
+  padding: 6px;
+  border-radius: 12px;
+  background: #2B2B2B;
+  border: 1px solid #3a3633;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.perso-dd-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background .14s ease;
+}
+
+.perso-dd-item:hover {
+  background: rgba(255, 255, 255, .06);
+}
+
+.perso-dd-item.is-active {
+  background: rgba(95, 196, 201, .14);
+}
+
+.perso-dd-item-title {
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.perso-dd-item-desc {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.perso-dd-item svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.perso-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.perso-section-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.perso-section-sub {
+  margin-top: 3px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.perso-textarea {
+  width: 100%;
+  min-height: 120px;
+  max-height: 180px;
+  overflow-y: auto;
+  resize: none;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #2e2a27;
+  outline: 0;
+  background: #1E1D1C;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.perso-textarea:focus {
+  border-color: rgba(95, 196, 201, .45);
+}
+
+.perso-save-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.perso-save {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 0;
+  background: #ededed;
+  color: #1a1a1a;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.perso-save:hover {
+  background: #fff;
+}
+
+.perso-mem-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: #1E1D1C;
+  border: 1px solid #2e2a27;
+  overflow: hidden;
+}
+
+.perso-mem-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.perso-mem-row + .perso-mem-row {
+  border-top: 1px solid #2a2724;
+}
+
+.perso-mem-title {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.perso-mem-desc {
+  margin-top: 3px;
+  max-width: 460px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.perso-reset {
+  flex: 0 0 auto;
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(215, 95, 95, .32);
+  background: rgba(215, 95, 95, .12);
+  color: #d98a8a;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.perso-reset:hover {
+  background: rgba(215, 95, 95, .2);
 }
 
 .file-changes-card {
