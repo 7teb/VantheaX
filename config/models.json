@@ -53,5 +53,113 @@
     "supportsVision": true,
     "contextLength": 1000000,
     "maxOutput": 65536
+  },
+  {
+    "id": "nvidia:deepseek-ai/deepseek-v4-flash",
+    "apiId": "deepseek-ai/deepseek-v4-flash",
+    "apiProvider": "nvidia",
+    "label": "DeepSeek V4 Flash",
+    "provider": "Nvidia",
+    "providerKey": "nvidia",
+    "efforts": ["none", "high", "max"],
+    "defaultEffort": "high",
+    "effortMap": {
+      "none": { "reasoning_effort": "none" },
+      "high": { "reasoning_effort": "high" },
+      "max": { "reasoning_effort": "max" }
+    },
+    "supportsVision": false,
+    "maxOutput": 16384,
+    "defaultTopP": 0.95
+  },
+  {
+    "id": "nvidia:deepseek-ai/deepseek-v4-pro",
+    "apiId": "deepseek-ai/deepseek-v4-pro",
+    "apiProvider": "nvidia",
+    "label": "DeepSeek V4 Pro",
+    "provider": "Nvidia",
+    "providerKey": "nvidia",
+    "efforts": ["none", "high", "max"],
+    "defaultEffort": "high",
+    "effortMap": {
+      "none": { "reasoning_effort": "none" },
+      "high": { "reasoning_effort": "high" },
+      "max": { "reasoning_effort": "max" }
+    },
+    "supportsVision": false,
+    "maxOutput": 16384,
+    "defaultTopP": 0.95
+  },
+  {
+    "id": "nvidia:z-ai/glm-5.2",
+    "apiId": "z-ai/glm-5.2",
+    "apiProvider": "nvidia",
+    "label": "GLM 5.2",
+    "provider": "Nvidia",
+    "providerKey": "nvidia",
+    "efforts": ["off", "high", "max"],
+    "defaultEffort": "max",
+    "effortMap": {
+      "off": { "chat_template_kwargs": { "enable_thinking": false } },
+      "high": { "chat_template_kwargs": { "enable_thinking": true, "reasoning_effort": "high" } },
+      "max": { "chat_template_kwargs": { "enable_thinking": true, "reasoning_effort": "max" } }
+    },
+    "supportsVision": false,
+    "maxOutput": 32768,
+    "defaultTopP": 1
+  },
+  {
+    "id": "nvidia:moonshotai/kimi-k2.6",
+    "apiId": "moonshotai/kimi-k2.6",
+    "apiProvider": "nvidia",
+    "label": "Kimi K2.6",
+    "provider": "Nvidia",
+    "providerKey": "nvidia",
+    "efforts": ["off", "on"],
+    "defaultEffort": "on",
+    "effortMap": {
+      "off": { "chat_template_kwargs": { "thinking": false } },
+      "on": { "chat_template_kwargs": { "thinking": true } }
+    },
+    "supportsVision": true,
+    "maxOutput": 65536,
+    "defaultTopP": 1
+  },
+  {
+    "id": "nvidia:minimaxai/minimax-m3",
+    "apiId": "minimaxai/minimax-m3",
+    "apiProvider": "nvidia",
+    "label": "MiniMax M3",
+    "provider": "Nvidia",
+    "providerKey": "nvidia",
+    "efforts": ["disabled", "adaptive", "enabled"],
+    "defaultEffort": "enabled",
+    "effortMap": {
+      "disabled": { "chat_template_kwargs": { "thinking_mode": "disabled" } },
+      "adaptive": { "chat_template_kwargs": { "thinking_mode": "adaptive" } },
+      "enabled": { "chat_template_kwargs": { "thinking_mode": "enabled" } }
+    },
+    "supportsVision": false,
+    "maxOutput": 16384,
+    "defaultTopP": 0.95
+  },
+  {
+    "id": "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
+    "apiId": "nvidia/nemotron-3-ultra-550b-a55b",
+    "apiProvider": "nvidia",
+    "label": "Nemotron 3 Ultra 550B",
+    "provider": "Nvidia",
+    "providerKey": "nvidia",
+    "efforts": ["none", "medium", "high"],
+    "defaultEffort": "high",
+    "effortMap": {
+      "none": { "reasoning_effort": "none" },
+      "medium": { "reasoning_effort": "medium" },
+      "high": { "reasoning_effort": "high" }
+    },
+    "supportsReasoningBudget": true,
+    "supportsVision": false,
+    "maxOutput": 32768,
+    "defaultTopP": 0.95
   }
 ]

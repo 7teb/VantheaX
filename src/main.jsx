@@ -62,6 +62,7 @@ const STRINGS = {
     "composer.goalPlaceholder": "What goal should VantheaX work toward?",
     "composer.removeGoal": "Remove goal",
     "composer.stop": "Stop",
+    "composer.naming": "Naming this chat",
     "plus.add": "Add",
     "plus.attach": "Add photos and files",
     "plus.planMode": "Plan mode",
@@ -95,6 +96,9 @@ const STRINGS = {
     "plan.no": "No",
     "plan.yes": "Yes, implement",
     "work.thinking": "Thinking",
+    "planBlock.title": "Blocked by plan mode ({tool})",
+    "planBlock.withPlan": "Plan mode is read-only, so nothing was changed. Accept the plan above to start the work, or switch plan mode off in the + menu.",
+    "planBlock.noPlan": "Plan mode is read-only, so nothing was changed. Let it present a plan you can accept, or switch plan mode off in the + menu.",
     "work.workingSince": "Working for {s}s",
     "work.worked": "Worked {time}",
     "edit.oneFile": "1 file edited",
@@ -159,6 +163,20 @@ const STRINGS = {
     "settings.tabMcp": "MCP servers",
     "settings.tabWebSearch": "Web search",
     "settings.tabPersonalization": "Personalization",
+    "settings.tabModelEval": "Model eval",
+    "eval.enable": "Enable NVIDIA models",
+    "eval.key": "NVIDIA API key",
+    "eval.intro": "NVIDIA hosts open models for free on build.nvidia.com. Their trial terms allow testing and evaluation only, not production, and section 3.3 states that your prompts and the model output are collected to improve NVIDIA products including AI models. Do not point this at code you want to keep private.",
+    "eval.getKey": "Get a key at build.nvidia.com",
+    "eval.params": "Sampling",
+    "eval.temperature": "Temperature",
+    "eval.topP": "Top P",
+    "eval.maxTokens": "Max output tokens",
+    "eval.budget": "Reasoning budget (Nemotron)",
+    "eval.budgetHint": "-1 disables the limit",
+    "eval.maxHint": "Clamped per model: 16k DeepSeek and MiniMax, 32k GLM and Nemotron, 64k Kimi",
+    "eval.topPHint": "Leave at 1 when you tune temperature, NVIDIA advises against changing both",
+    "eval.models": "Models added to the picker",
     "perso.personality": "Personality",
     "perso.personalitySub": "Choose the default tone for responses",
     "perso.pragmatic": "Pragmatic",
@@ -326,6 +344,7 @@ const STRINGS = {
     "composer.goalPlaceholder": "Auf welches Ziel soll VantheaX hinarbeiten?",
     "composer.removeGoal": "Ziel entfernen",
     "composer.stop": "Stopp",
+    "composer.naming": "Chat wird benannt",
     "plus.add": "Hinzufügen",
     "plus.attach": "Fotos und Dateien hinzufügen",
     "plus.planMode": "Planmodus",
@@ -359,6 +378,9 @@ const STRINGS = {
     "plan.no": "Nein",
     "plan.yes": "Ja, implementieren",
     "work.thinking": "Denkt nach",
+    "planBlock.title": "Vom Planmodus blockiert ({tool})",
+    "planBlock.withPlan": "Der Planmodus ist read-only, es wurde nichts geändert. Nimm den Plan oben an, damit die Arbeit startet, oder schalte den Planmodus im +-Menü aus.",
+    "planBlock.noPlan": "Der Planmodus ist read-only, es wurde nichts geändert. Lass erst einen Plan präsentieren, den du annehmen kannst, oder schalte den Planmodus im +-Menü aus.",
     "work.workingSince": "In Arbeit seit {s}s",
     "work.worked": "{time} gearbeitet",
     "edit.oneFile": "1 Datei bearbeitet",
@@ -423,6 +445,20 @@ const STRINGS = {
     "settings.tabMcp": "MCP-Server",
     "settings.tabWebSearch": "Websuche",
     "settings.tabPersonalization": "Personalisierung",
+    "settings.tabModelEval": "Modell-Eval",
+    "eval.enable": "NVIDIA-Modelle aktivieren",
+    "eval.key": "NVIDIA-API-Key",
+    "eval.intro": "NVIDIA hostet offene Modelle kostenlos auf build.nvidia.com. Die Trial-Bedingungen erlauben nur Test und Evaluierung, keinen Produktiveinsatz, und Abschnitt 3.3 sagt, dass deine Prompts und die Modellausgaben gesammelt werden, um NVIDIA-Produkte inklusive KI-Modelle zu verbessern. Nicht auf Code richten, der privat bleiben soll.",
+    "eval.getKey": "Key holen auf build.nvidia.com",
+    "eval.params": "Sampling",
+    "eval.temperature": "Temperatur",
+    "eval.topP": "Top P",
+    "eval.maxTokens": "Max. Output-Tokens",
+    "eval.budget": "Reasoning-Budget (Nemotron)",
+    "eval.budgetHint": "-1 hebt das Limit auf",
+    "eval.maxHint": "Pro Modell geklemmt: 16k DeepSeek und MiniMax, 32k GLM und Nemotron, 64k Kimi",
+    "eval.topPHint": "Auf 1 lassen, wenn du die Temperatur änderst, NVIDIA rät davon ab beides zu ändern",
+    "eval.models": "Modelle im Picker",
     "perso.personality": "Persönlichkeit",
     "perso.personalitySub": "Standard-Ton für Antworten auswählen",
     "perso.pragmatic": "Pragmatisch",
@@ -561,6 +597,7 @@ const BOTTOM_STICK_PX = 100;
 
 let stickRaf = 0;
 let isAutoScrolling = false;
+let followBottom = true;
 const autoScroll = (el) => {
   isAutoScrolling = true;
   el.scrollTop = el.scrollHeight;
@@ -575,7 +612,7 @@ const stickMessagesToBottom = () => {
   stickRaf = requestAnimationFrame(() => {
     stickRaf = 0;
     const el = document.querySelector(".messages");
-    if (el) {
+    if (el && followBottom) {
       autoScroll(el);
     }
   });
@@ -593,7 +630,7 @@ const animateDetails = (details, opening) => {
     prev.cancel();
   }
   const scroller = document.querySelector(".messages");
-  const followBottom = opening && scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < BOTTOM_STICK_PX;
+  const followAnim = opening && followBottom && scroller && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < BOTTOM_STICK_PX;
   details.style.overflow = "hidden";
   if (opening) {
     details.open = true;
@@ -604,7 +641,7 @@ const animateDetails = (details, opening) => {
     { duration: 240, easing: "cubic-bezier(.22, .72, .22, 1)" },
   );
   detailsAnims.set(details, anim);
-  if (followBottom) {
+  if (followAnim) {
     const follow = () => {
       if (anim.playState === "running") {
         autoScroll(scroller);
@@ -622,7 +659,7 @@ const animateDetails = (details, opening) => {
     if (!opening) {
       details.open = false;
     }
-    if (followBottom) {
+    if (followAnim) {
       autoScroll(scroller);
     }
     cleanup();
@@ -829,6 +866,166 @@ const formatRelativeTime = (iso) => {
   return t("time.month", { n: Math.floor(days / 30) });
 };
 
+const STREAM_TARGET_LATENCY = 0.9;
+const STREAM_MIN_CPS = 25;
+const STREAM_MAX_CPS = 900;
+const STREAM_STALL_CHECK = 2000;
+
+const createStreamPacer = (apply) => {
+  const queue = [];
+  let queuedChars = 0;
+  let raf = 0;
+  let lastFrame = 0;
+  let carry = 0;
+  let ended = false;
+  let resolveDrained = null;
+  let watchdog = 0;
+  let watchedChars = -1;
+
+  const settle = () => {
+    if (queue.length || !resolveDrained) {
+      return;
+    }
+    if (watchdog) {
+      clearInterval(watchdog);
+      watchdog = 0;
+    }
+    const done = resolveDrained;
+    resolveDrained = null;
+    done();
+  };
+
+  const applyAll = () => {
+    let text = "";
+    while (queue.length) {
+      const head = queue.shift();
+      if (typeof head === "string") {
+        text += head;
+        continue;
+      }
+      if (text) {
+        apply({ type: "delta", delta: text });
+        text = "";
+      }
+      apply(head);
+    }
+    if (text) {
+      apply({ type: "delta", delta: text });
+    }
+    queuedChars = 0;
+  };
+
+  const drain = (now) => {
+    raf = 0;
+    if (!lastFrame) {
+      lastFrame = now;
+    }
+    const dt = Math.min(0.25, Math.max(0, (now - lastFrame) / 1000));
+    lastFrame = now;
+    const rate = Math.min(STREAM_MAX_CPS, Math.max(STREAM_MIN_CPS, queuedChars / STREAM_TARGET_LATENCY));
+    carry += rate * dt;
+    let budget = Math.floor(carry);
+    carry -= budget;
+    let text = "";
+    while (queue.length) {
+      const head = queue[0];
+      if (typeof head === "string") {
+        if (budget < 1) {
+          break;
+        }
+        const take = Math.min(head.length, budget);
+        text += head.slice(0, take);
+        budget -= take;
+        queuedChars -= take;
+        if (take >= head.length) {
+          queue.shift();
+        } else {
+          queue[0] = head.slice(take);
+        }
+        continue;
+      }
+      if (text) {
+        apply({ type: "delta", delta: text });
+        text = "";
+      }
+      apply(queue.shift());
+    }
+    if (text) {
+      apply({ type: "delta", delta: text });
+    }
+    if (queue.length) {
+      raf = requestAnimationFrame(drain);
+      return;
+    }
+    lastFrame = 0;
+    carry = 0;
+    settle();
+  };
+
+  const kick = () => {
+    if (!raf && queue.length) {
+      raf = requestAnimationFrame(drain);
+    }
+  };
+
+  return {
+    push(event) {
+      if (ended) {
+        return;
+      }
+      if (event.type === "delta") {
+        if (!event.delta) {
+          return;
+        }
+        const tail = queue[queue.length - 1];
+        if (typeof tail === "string") {
+          queue[queue.length - 1] = tail + event.delta;
+        } else {
+          queue.push(event.delta);
+        }
+        queuedChars += event.delta.length;
+      } else {
+        queue.push(event);
+      }
+      kick();
+    },
+    finish() {
+      ended = true;
+      if (!queue.length) {
+        return Promise.resolve();
+      }
+      kick();
+      return new Promise((resolve) => {
+        resolveDrained = resolve;
+        watchedChars = -1;
+        watchdog = setInterval(() => {
+          if (queuedChars !== watchedChars) {
+            watchedChars = queuedChars;
+            return;
+          }
+          if (raf) {
+            cancelAnimationFrame(raf);
+            raf = 0;
+          }
+          applyAll();
+          settle();
+        }, STREAM_STALL_CHECK);
+      });
+    },
+    flush() {
+      ended = true;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      lastFrame = 0;
+      carry = 0;
+      applyAll();
+      settle();
+    },
+  };
+};
+
 const App = () => {
   const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" } });
   const [models, setModels] = useState([]);
@@ -873,14 +1070,16 @@ const App = () => {
   const [pendingPermission, setPendingPermission] = useState(null);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(null);
+  const [naming, setNaming] = useState(false);
+  const [titleAnim, setTitleAnim] = useState(null);
   const fileInputRef = useRef(null);
   const chatsLoadedRef = useRef(false);
   const activeRequestRef = useRef(null);
   const activeMsgRef = useRef(null);
   const messagesRef = useRef(null);
-  const atBottomRef = useRef(true);
   const contextStampRef = useRef(-1);
   const compactingRef = useRef(false);
+  const pacerRef = useRef(null);
 
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [chats, activeChatId]);
   useEffect(() => {
@@ -1060,6 +1259,21 @@ const App = () => {
 
   const noProjectChats = useMemo(() => sortChats(chats.filter((chat) => !chat.projectPath)), [chats]);
 
+  const visibleModels = useMemo(
+    () => models.filter((model) => model.apiProvider !== "nvidia" || settings.nvidia?.enabled),
+    [models, settings.nvidia?.enabled],
+  );
+
+  useEffect(() => {
+    if (!models.length || !settings.model || visibleModels.some((model) => model.id === settings.model)) {
+      return;
+    }
+    const fallback = visibleModels[0];
+    if (fallback) {
+      persistSettings({ model: fallback.id, effort: fallback.defaultEffort || "" });
+    }
+  }, [models, visibleModels, settings.model]);
+
   const searchedChats = useMemo(() => {
     const text = chatQuery.trim().toLowerCase();
     const pool = chats.slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -1075,6 +1289,46 @@ const App = () => {
   const updateChats = (updater) => {
     setChats((current) => updater(current));
   };
+
+  const displayTitle = (chat) => (chat && titleAnim && titleAnim.chatId === chat.id ? titleAnim.shown : (chat?.title || ""));
+
+  const resolveChatTitle = async (text) => {
+    const fallback = titleFromText(text);
+    if (!settings.hasOpenRouterKey) {
+      return fallback;
+    }
+    try {
+      const res = await api.generateChatTitle({ message: text });
+      const clean = (res && !res.error && typeof res.title === "string") ? res.title.trim() : "";
+      return (clean && clean.toLowerCase() !== "new chat") ? clean : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const typeChatTitle = (chatId, title) => new Promise((resolve) => {
+    const full = String(title || "");
+    if (!full) {
+      resolve();
+      return;
+    }
+    const step = Math.max(16, Math.min(48, Math.round(900 / full.length)));
+    let shown = 0;
+    const tick = () => {
+      shown += 1;
+      setTitleAnim({ chatId, shown: full.slice(0, shown) });
+      if (shown >= full.length) {
+        setTimeout(() => {
+          setTitleAnim((current) => (current && current.chatId === chatId ? null : current));
+          resolve();
+        }, 220);
+        return;
+      }
+      setTimeout(tick, step);
+    };
+    setTitleAnim({ chatId, shown: "" });
+    setTimeout(tick, step);
+  });
 
   const renameChat = (chatId, title) => {
     const clean = title.trim();
@@ -1150,9 +1404,7 @@ const App = () => {
     await refreshProject(pathValue);
     const saved = await api.getSettings();
     setSettings(saved);
-    const chat = makeChat(pathValue);
-    updateChats((current) => [chat, ...current]);
-    setActiveChatId(chat.id);
+    setActiveChatId("");
   };
 
   const createProject = async () => {
@@ -1167,9 +1419,7 @@ const App = () => {
     await refreshProject(pathValue);
     const saved = await api.getSettings();
     setSettings(saved);
-    const chat = makeChat(pathValue);
-    updateChats((current) => [chat, ...current]);
-    setActiveChatId(chat.id);
+    setActiveChatId("");
   };
 
   const selectProject = async (pathValue) => {
@@ -1205,12 +1455,24 @@ const App = () => {
     }
     const el = messagesRef.current;
     if (el) {
-      atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_STICK_PX;
+      followBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_STICK_PX;
     }
   };
 
+  const onMessagesWheel = (event) => {
+    if (event.deltaY >= 0 || event.currentTarget.scrollHeight - event.currentTarget.clientHeight <= 2) {
+      return;
+    }
+    for (let node = event.target; node && node !== event.currentTarget; node = node.parentElement) {
+      if (node.scrollHeight - node.clientHeight > 2 && node.scrollTop > 0) {
+        return;
+      }
+    }
+    followBottom = false;
+  };
+
   useEffect(() => {
-    if (atBottomRef.current) {
+    if (followBottom) {
       stickMessagesToBottom();
     }
   }, [messages]);
@@ -1251,10 +1513,9 @@ const App = () => {
 
   const newChat = () => {
     cancelActiveStream();
-    atBottomRef.current = true;
-    const chat = makeChat(projectPath);
-    updateChats((current) => [chat, ...current]);
-    setActiveChatId(chat.id);
+    followBottom = true;
+    setActiveChatId("");
+    setTitleAnim(null);
     setInput("");
     setImageAttachment(null);
     setGoalText("");
@@ -1329,7 +1590,7 @@ const App = () => {
 
   const openChat = async (chat) => {
     cancelActiveStream();
-    atBottomRef.current = true;
+    followBottom = true;
     setActiveChatId(chat.id);
     setSearchOpen(false);
     setTodos([]);
@@ -1385,9 +1646,11 @@ const App = () => {
     try {
       const usage = await api.estimateContext({
         projectPath,
+        workspaceName: chat?.workspaceName || "",
         model: settings.model,
         effort: settings.effort,
         mode: settings.mode,
+        webSearchEnabled: Boolean(settings.webSearch?.enabled && settings.hasTavilyKey),
         planMode,
         goalMode,
         goal: goalText,
@@ -1396,8 +1659,10 @@ const App = () => {
         history: cleanHistory(eff),
         readPaths: collectReadPaths(eff),
       });
-      setContextUsage(usage);
-      contextStampRef.current = fullLen;
+      if (usage && !usage.error) {
+        setContextUsage(usage);
+        contextStampRef.current = fullLen;
+      }
     } catch {}
   };
 
@@ -1528,7 +1793,7 @@ const App = () => {
     if (goalMode && !goalText.trim() && text) {
       setGoalText(text);
     }
-    if ((!text && !imageAttachment) || busy || compactingRef.current) {
+    if ((!text && !imageAttachment) || busy || naming || compactingRef.current) {
       return;
     }
     const attachment = imageAttachment;
@@ -1547,11 +1812,7 @@ const App = () => {
     setTodos([]);
     setGoalDone(false);
     const chat = activeChat || makeChat(projectPath);
-    if (!activeChat) {
-      updateChats((current) => [chat, ...current]);
-      setActiveChatId(chat.id);
-    }
-    atBottomRef.current = true;
+    followBottom = true;
     const assistantId = crypto.randomUUID();
     const userMessage = {
       id: crypto.randomUUID(),
@@ -1563,18 +1824,31 @@ const App = () => {
     const assistantDraft = { id: assistantId, role: "assistant", content: "", tools: [], segments: [], startedAt: Date.now(), done: false, createdAt: new Date().toISOString() };
     const previousMessages = chat.messages || [];
     const nextMessages = [...previousMessages, userMessage, assistantDraft];
-    const nextTitle = chat.title === "New chat" ? titleFromText(userMessage.content) : chat.title;
-    const workspaceName = projectPath ? "" : (chat.workspaceName || `${(chat.createdAt || new Date().toISOString()).slice(0, 10)} ${slugForFolder(nextTitle)} ${String(chat.id).slice(0, 4)}`);
+    const needsTitle = chat.title === "New chat";
     setInput("");
+    let nextTitle = chat.title;
+    if (needsTitle) {
+      setNaming(true);
+      try {
+        nextTitle = await resolveChatTitle(userMessage.content);
+      } finally {
+        setNaming(false);
+      }
+    }
+    const workspaceName = projectPath ? "" : (chat.workspaceName || `${(chat.createdAt || new Date().toISOString()).slice(0, 10)} ${slugForFolder(nextTitle)} ${String(chat.id).slice(0, 4)}`);
     setBusy(true);
     const requestId = crypto.randomUUID();
     activeRequestRef.current = requestId;
     activeMsgRef.current = { chatId: chat.id, assistantId };
+    setActiveChatId(chat.id);
     updateChats((current) => {
       const exists = current.some((item) => item.id === chat.id);
       const mapped = (exists ? current : [chat, ...current]).map((item) => item.id === chat.id ? { ...item, title: nextTitle, projectPath, workspaceName: workspaceName || item.workspaceName || "", messages: nextMessages, updatedAt: new Date().toISOString() } : item);
       return mapped;
     });
+    if (needsTitle) {
+      await typeChatTitle(chat.id, nextTitle);
+    }
     let imageAnalysis = "";
     if (savedImage) {
       setStatus(t("status.analyzingImage"));
@@ -1602,6 +1876,7 @@ const App = () => {
           model: settings.model,
           effort: settings.effort,
           mode: settings.mode,
+          webSearchEnabled: Boolean(settings.webSearch?.enabled && settings.hasTavilyKey),
           planMode: effectivePlanMode,
           goalMode,
           goal: effectiveGoal,
@@ -1627,6 +1902,60 @@ const App = () => {
     if (activeRequestRef.current !== requestId) {
       return;
     }
+    const applyStreamEvent = (event) => {
+      if (event.type === "delta") {
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
+          if (message.id !== assistantId) {
+            return message;
+          }
+          const segments = message.segments ? [...message.segments] : [];
+          const last = segments[segments.length - 1];
+          if (last && last.type === "text") {
+            segments[segments.length - 1] = { ...last, content: last.content + event.delta };
+          } else {
+            segments.push({ type: "text", content: event.delta });
+          }
+          return { ...message, content: `${message.content || ""}${event.delta}`, segments, liveTool: null };
+        }), updatedAt: new Date().toISOString() } : item));
+      }
+      if (event.type === "tool_progress") {
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
+          message.id === assistantId ? { ...message, liveTool: { name: event.name, path: event.path, lines: event.lines } } : message
+        ) } : item));
+      }
+      if (event.type === "tool") {
+        if (event.tool?.name === "update_todos" && Array.isArray(event.tool.result?.todos)) {
+          setTodos(event.tool.result.todos);
+        }
+        if (event.tool?.name === "verify_goal" && event.tool.result?.verifier?.done) {
+          setGoalDone(true);
+        }
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
+          if (message.id !== assistantId) {
+            return message;
+          }
+          const existing = message.tools || [];
+          const at = existing.findIndex((entry) => entry.id === event.tool.id);
+          const tools = at >= 0 ? existing.map((entry, idx) => idx === at ? event.tool : entry) : [...existing, event.tool];
+          const segments = message.segments ? [...message.segments] : [];
+          const si = segments.findIndex((entry) => entry.type === "tool" && entry.tool.id === event.tool.id);
+          if (si >= 0) {
+            segments[si] = { type: "tool", tool: event.tool };
+          } else {
+            segments.push({ type: "tool", tool: event.tool });
+          }
+          return { ...message, tools, segments, liveTool: null };
+        }), updatedAt: new Date().toISOString() } : item));
+        if (event.tool?.result?.permissionRequired) {
+          setPendingPermission({ callId: event.tool.id, tool: event.tool });
+        } else if (event.tool?.id) {
+          setPendingPermission((prev) => (prev && prev.callId === event.tool.id ? null : prev));
+        }
+      }
+    };
+    const pacer = createStreamPacer(applyStreamEvent);
+    pacerRef.current = pacer;
+    let sawTool = false;
     try {
       const result = await api.sendMessage({
         requestId,
@@ -1647,56 +1976,22 @@ const App = () => {
         history: cleanHistory(previousMessages.slice(effStart)),
         readPaths: collectReadPaths(previousMessages.slice(effStart)),
       }, (event) => {
-        if (event.type === "delta") {
-          updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
-            if (message.id !== assistantId) {
-              return message;
-            }
-            const segments = message.segments ? [...message.segments] : [];
-            const last = segments[segments.length - 1];
-            if (last && last.type === "text") {
-              segments[segments.length - 1] = { ...last, content: last.content + event.delta };
-            } else {
-              segments.push({ type: "text", content: event.delta });
-            }
-            return { ...message, content: `${message.content || ""}${event.delta}`, segments, liveTool: null };
-          }), updatedAt: new Date().toISOString() } : item));
-        }
-        if (event.type === "tool_progress") {
-          updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
-            message.id === assistantId ? { ...message, liveTool: { name: event.name, path: event.path, lines: event.lines } } : message
-          ) } : item));
-        }
-        if (event.type === "tool") {
-          if (event.tool?.name === "update_todos" && Array.isArray(event.tool.result?.todos)) {
-            setTodos(event.tool.result.todos);
+        if (event.type === "context") {
+          if (event.usage) {
+            setContextUsage(event.usage);
           }
-          if (event.tool?.name === "verify_goal" && event.tool.result?.verifier?.done) {
-            setGoalDone(true);
-          }
-          updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
-            if (message.id !== assistantId) {
-              return message;
-            }
-            const existing = message.tools || [];
-            const at = existing.findIndex((entry) => entry.id === event.tool.id);
-            const tools = at >= 0 ? existing.map((entry, idx) => idx === at ? event.tool : entry) : [...existing, event.tool];
-            const segments = message.segments ? [...message.segments] : [];
-            const si = segments.findIndex((entry) => entry.type === "tool" && entry.tool.id === event.tool.id);
-            if (si >= 0) {
-              segments[si] = { type: "tool", tool: event.tool };
-            } else {
-              segments.push({ type: "tool", tool: event.tool });
-            }
-            return { ...message, tools, segments, liveTool: null };
-          }), updatedAt: new Date().toISOString() } : item));
-          if (event.tool?.result?.permissionRequired) {
-            setPendingPermission({ callId: event.tool.id, tool: event.tool });
-          } else if (event.tool?.id) {
-            setPendingPermission((prev) => (prev && prev.callId === event.tool.id ? null : prev));
-          }
+          return;
         }
+        if (event.type === "tool" && !event.tool?.result?.plan) {
+          sawTool = true;
+        }
+        pacer.push(event);
       });
+      if (sawTool) {
+        await pacer.finish();
+      } else {
+        pacer.flush();
+      }
       updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => (message.id === assistantId && !message.cancelled) ? { ...message, content: result.content || message.content, tools: result.tools || message.tools || [], done: true, workMs: message.workMs || (Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() } : item));
       if (settings.memory?.enabled && result && result.content) {
         const usedTools = Array.isArray(result.tools) && result.tools.some((tl) => tl.name === "web_search" || String(tl.name || "").startsWith("mcp__"));
@@ -1709,11 +2004,16 @@ const App = () => {
         setStatus(t("status.ready"));
       }
     } catch (error) {
+      pacer.flush();
       if (activeRequestRef.current === requestId) {
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: error.message, error: true, tools: [], segments: [], done: true } : message), updatedAt: new Date().toISOString() } : item));
         setStatus(t("status.failed"));
       }
     } finally {
+      pacer.flush();
+      if (pacerRef.current === pacer) {
+        pacerRef.current = null;
+      }
       if (activeRequestRef.current === requestId) {
         setBusy(false);
         activeRequestRef.current = null;
@@ -1724,6 +2024,7 @@ const App = () => {
 
   const stopGeneration = () => {
     const active = activeMsgRef.current;
+    pacerRef.current?.flush();
     if (activeRequestRef.current) {
       api.cancelStream(activeRequestRef.current);
     }
@@ -1882,7 +2183,7 @@ const App = () => {
                             <div className="project-empty">{t("tree.noChats")}</div>
                           ) : list.map((chat) => (
                             <button key={chat.id} className={chat.id === activeChatId ? "tree-chat active" : "tree-chat"} onClick={() => openChat(chat)}>
-                              <span>{chat.title}</span>
+                              <span>{displayTitle(chat)}</span>
                               {chat.pinned && <Pin size={12} className="chat-row-pin" />}
                               <small>{formatRelativeTime(chat.updatedAt)}</small>
                             </button>
@@ -1901,7 +2202,7 @@ const App = () => {
               <div className="project-chats-inner project-chats-root">
                 {noProjectChats.map((chat) => (
                   <button key={chat.id} className={chat.id === activeChatId ? "tree-chat active" : "tree-chat"} onClick={() => openChat(chat)}>
-                    <span>{chat.title}</span>
+                    <span>{displayTitle(chat)}</span>
                     {chat.pinned && <Pin size={12} className="chat-row-pin" />}
                     <small>{formatRelativeTime(chat.updatedAt)}</small>
                   </button>
@@ -1933,7 +2234,7 @@ const App = () => {
                   onBlur={commitRename}
                 />
               ) : (
-                <div className="chat-title">{activeChat?.title || "New chat"}</div>
+                <div className={titleAnim && titleAnim.chatId === activeChat?.id ? "chat-title is-typing" : "chat-title"}>{activeChat ? displayTitle(activeChat) : "New chat"}</div>
               )}
               {activeChat && (
                 <div className="chat-menu-wrap">
@@ -1951,7 +2252,7 @@ const App = () => {
           )}
 
           {messages.length > 0 && (
-            <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
+            <div className="messages" ref={messagesRef} onScroll={onMessagesScroll} onWheel={onMessagesWheel}>
               {messages.map((message, index) => (
                 <React.Fragment key={message.id || `${message.createdAt}-${index}`}>
                   {index === (activeChat?.summaryCount || 0) && (activeChat?.summaryCount || 0) > 0 && (
@@ -2000,8 +2301,12 @@ const App = () => {
                   <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
                   <PermissionPicker value={settings.mode} open={permissionOpen} onToggle={() => setPermissionOpen(!permissionOpen)} onChange={(mode) => { persistSettings({ mode }); setPermissionOpen(false); }} />
                   <div className="composer-spacer" />
-                  <ModelEffortPicker models={models} value={settings.model} effort={settings.effort} open={modelOpen} openProviders={openProviders} onToggle={() => setModelOpen(!modelOpen)} onToggleProvider={(provider) => setOpenProviders((current) => current.includes(provider) ? current.filter((item) => item !== provider) : [...current, provider])} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} />
-                  {busy ? (
+                  <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} open={modelOpen} openProviders={openProviders} onToggle={() => setModelOpen(!modelOpen)} onToggleProvider={(provider) => setOpenProviders((current) => current.includes(provider) ? current.filter((item) => item !== provider) : [...current, provider])} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} />
+                  {naming ? (
+                    <button className="send-button is-naming" disabled title={t("composer.naming")}>
+                      <LoaderIcon size={17} />
+                    </button>
+                  ) : busy ? (
                     <button className="send-button is-stopping" onClick={stopGeneration} title={t("composer.stop")}>
                       <Square size={15} />
                     </button>
@@ -2013,7 +2318,7 @@ const App = () => {
                 </div>
               </div>
               )}
-              {messages.length === 0 && !pendingPermission && (
+              {messages.length === 0 && !pendingPermission && !naming && (
                 <ProjectPicker open={projectMenuOpen} query={projectSearch} setQuery={setProjectSearch} projects={visibleProjects} selectedPath={projectPath} onToggle={() => setProjectMenuOpen(!projectMenuOpen)} onSelect={selectProject} onChooseProject={chooseProject} onCreateProject={createProject} onWorkWithoutProject={workWithoutProject} />
               )}
             </div>
@@ -2034,7 +2339,11 @@ const App = () => {
       </div>
 
       {searchOpen && <SearchOverlay chats={searchedChats} query={chatQuery} setQuery={setChatQuery} onClose={() => setSearchOpen(false)} onOpen={openChat} />}
-      {settingsOpen && <SettingsModal hasKey={settings.hasOpenRouterKey} value={keyInput} setValue={setKeyInput} onSave={saveKey} onClose={() => setSettingsOpen(false)} lang={settings.language || "en"} onLang={(value) => persistSettings({ language: value })} webSearch={settings.webSearch || { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }} hasTavilyKey={settings.hasTavilyKey} onWebChange={(patch) => persistSettings({ webSearch: patch })} onSaveTavilyKey={(k) => persistSettings({ tavilyKeyPlain: k })} personality={settings.personality || "pragmatic"} customInstructions={settings.customInstructions || ""} memory={settings.memory || { enabled: false, excludeToolChats: false }} onPersonality={(value) => persistSettings({ personality: value })} onSaveInstructions={(value) => persistSettings({ customInstructions: value })} onMemChange={(patch) => persistSettings({ memory: patch })} onResetMemory={() => api.resetMemories()} />}
+      {settingsOpen && <SettingsModal hasKey={settings.hasOpenRouterKey} value={keyInput} setValue={setKeyInput} onSave={saveKey} onClose={() => setSettingsOpen(false)} lang={settings.language || "en"} onLang={(value) => persistSettings({ language: value })} webSearch={settings.webSearch || { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }} hasTavilyKey={settings.hasTavilyKey} onWebChange={(patch) => persistSettings({ webSearch: patch })} onSaveTavilyKey={(k) => persistSettings({ tavilyKeyPlain: k })} personality={settings.personality || "pragmatic"} customInstructions={settings.customInstructions || ""} memory={settings.memory || { enabled: false, excludeToolChats: false }} onPersonality={(value) => persistSettings({ personality: value })} onSaveInstructions={(value) => persistSettings({ customInstructions: value })} onMemChange={(patch) => persistSettings({ memory: patch })} onResetMemory={() => api.resetMemories()} models={models} nvidia={settings.nvidia || { enabled: false, temperature: 0.2, topP: 1, maxTokens: 16384, reasoningBudget: 16384 }} hasNvidiaKey={settings.hasNvidiaKey} onNvidiaChange={(patch) => {
+        const leaving = patch.enabled === false && models.find((item) => item.id === settings.model)?.apiProvider === "nvidia";
+        const fallback = models.find((item) => item.apiProvider !== "nvidia");
+        persistSettings(leaving && fallback ? { nvidia: patch, model: fallback.id, effort: fallback.defaultEffort || "" } : { nvidia: patch });
+      }} onSaveNvidiaKey={(k) => persistSettings({ nvidiaKeyPlain: k })} />}
     </div>
   );
 };
@@ -2046,7 +2355,7 @@ const compactModelName = (model) => {
   return model.label;
 };
 
-const EFFORT_LABEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Max" };
+const EFFORT_LABEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Max", max: "Max", none: "Off", off: "Off", on: "On", disabled: "Off", adaptive: "Adaptive", enabled: "On" };
 
 const ModelEffortPicker = ({ models, value, effort, open, openProviders, onToggle, onToggleProvider, onModelChange, onEffortChange }) => {
   const selected = models.find((model) => model.id === value) || models[0];
@@ -2303,6 +2612,20 @@ const ListIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" />
     <path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" />
+  </svg>
+);
+
+const GripIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <circle cx="12" cy="5" r="1" /><circle cx="19" cy="5" r="1" /><circle cx="5" cy="5" r="1" />
+    <circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" />
+    <circle cx="12" cy="19" r="1" /><circle cx="19" cy="19" r="1" /><circle cx="5" cy="19" r="1" />
+  </svg>
+);
+
+const LoaderIcon = ({ size = 24, className = "", ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className ? `spin ${className}` : "spin"} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </svg>
 );
 
@@ -2591,6 +2914,16 @@ const useElapsedSeconds = (startedAt, active) => {
   return Math.max(1, Math.round((Date.now() - (startedAt || Date.now())) / 1000));
 };
 
+const PlanBlockedNote = ({ tool, hasPlan }) => (
+  <div className="plan-blocked">
+    <ShieldCheck size={14} />
+    <div>
+      <div className="plan-blocked-head">{t("planBlock.title", { tool: tool?.name || "" })}</div>
+      <div className="plan-blocked-body">{hasPlan ? t("planBlock.withPlan") : t("planBlock.noPlan")}</div>
+    </div>
+  </div>
+);
+
 const Thinking = () => (
   <div className="thinking">
     <span className="live-label" data-shimmer-label={t("work.thinking")}>{t("work.thinking")}</span>
@@ -2636,7 +2969,7 @@ const Typewriter = ({ text, animate }) => {
     };
   }, [text, animate]);
   useEffect(() => {
-    if (!animate) {
+    if (!animate || !followBottom) {
       return;
     }
     const scroller = document.querySelector(".messages");
@@ -2680,6 +3013,13 @@ const groupWorkSegments = (segments) => {
     }
     const tool = seg.tool;
     if (tool?.result?.plan) {
+      continue;
+    }
+    if (tool?.result?.planBlocked) {
+      const last = blocks[blocks.length - 1];
+      if (!last || last.kind !== "planBlocked") {
+        blocks.push({ kind: "planBlocked", tool });
+      }
       continue;
     }
     if (tool?.result?.todos) {
@@ -2885,15 +3225,27 @@ const ToolStep = ({ tool }) => {
   const label = getToolLabel(tool);
   if (result.running) {
     const liveOut = `${result.stdout || ""}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
+    const command = tool.args?.command || result.command || "";
+    const argsText = (!command && tool.args && Object.keys(tool.args).length) ? JSON.stringify(tool.args, null, 2) : "";
+    const head = (
+      <>
+        <span className="step-marker"><Icon size={14} /></span>
+        <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
+        <LoaderIcon size={13} className="running-spinner" />
+      </>
+    );
+    if (!command && !argsText && !liveOut) {
+      return <div className="running-head">{head}</div>;
+    }
     return (
-      <div className="tool-step running">
-        <div className="running-head">
-          <span className="step-marker"><Icon size={14} /></span>
-          <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
-          <span className="running-dots" aria-hidden="true"><i /><i /><i /></span>
+      <details className="tool-step running">
+        <summary>{head}</summary>
+        <div className="step-body">
+          {command && <div className="tool-command">{command}</div>}
+          {argsText && <pre>{argsText}</pre>}
+          {liveOut && <pre className="running-output">{liveOut.slice(-2000)}</pre>}
         </div>
-        {liveOut && <pre className="running-output">{liveOut.slice(-2000)}</pre>}
-      </div>
+      </details>
     );
   }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
@@ -2987,11 +3339,11 @@ const WebSearchStep = ({ tool }) => {
   const label = t("toollabel.webSearch");
   if (result.running) {
     return (
-      <div className="tool-step running web-search-running">
+      <div className="tool-step web-search-running">
         <div className="running-head">
           <span className="step-marker"><GlobeCheckIcon size={14} /></span>
           <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
-          <span className="running-dots" aria-hidden="true"><i /><i /><i /></span>
+          <LoaderIcon size={13} className="running-spinner" />
         </div>
       </div>
     );
@@ -3026,7 +3378,7 @@ const WebSearchStep = ({ tool }) => {
   );
 };
 
-const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
+const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) => {
   const detailsRef = useRef(null);
   const wasWorking = useRef(false);
   const elapsed = useElapsedSeconds(startedAt, working);
@@ -3064,6 +3416,9 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool }) => {
             return block.tools.length === 1
               ? <ToolStep tool={block.tools[0]} key={key} />
               : <CommandGroup tools={block.tools} kind={block.kind} key={key} />;
+          }
+          if (block.kind === "planBlocked") {
+            return <PlanBlockedNote tool={block.tool} hasPlan={hasPlan} key={key} />;
           }
           if (block.kind === "todos") {
             return <TodoStep tool={block.tool} key={key} />;
@@ -3225,7 +3580,7 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
     return (
       <div className="message assistant">
         <div className="message-surface assistant-surface">
-          {hasWork && <WorkLog segments={workSegs} startedAt={message.startedAt} workMs={message.workMs} working={working} liveTool={working ? message.liveTool : null} />}
+          {hasWork && <WorkLog segments={workSegs} startedAt={message.startedAt} workMs={message.workMs} working={working} liveTool={working ? message.liveTool : null} hasPlan={Boolean(planSeg)} />}
           {planSeg && <PlanCard plan={planSeg.tool.result.plan} onAccept={onAcceptPlan} accepted={message.planAccepted} />}
           {hasWork
             ? (Boolean(finalText) && <div className="message-text markdown"><MarkdownMessage content={finalText} /></div>)
@@ -3830,7 +4185,72 @@ const WebSearchSettings = ({ config, hasKey, onChange, onSaveKey }) => {
   );
 };
 
-const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, onPersonality, onSaveInstructions, onMemChange, onResetMemory }) => {
+const ModelEvalSettings = ({ config, hasKey, models, onChange, onSaveKey }) => {
+  const cfg = config || { enabled: false, temperature: 0.2, topP: 1, maxTokens: 16384, reasoningBudget: 16384 };
+  const [keyInput, setKeyInput] = useState("");
+  const save = () => {
+    if (!keyInput.trim()) {
+      return;
+    }
+    onSaveKey(keyInput.trim());
+    setKeyInput("");
+  };
+  const nvModels = (models || []).filter((model) => model.apiProvider === "nvidia");
+  const num = (raw, min, max, fallback) => {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+  };
+  return (
+    <div className="web-settings">
+      <div className="modal-title"><GripIcon size={19} />{t("settings.tabModelEval")}</div>
+      <p className="eval-intro">{t("eval.intro")}</p>
+      <div className="web-row">
+        <span className="web-enable-label">{t("eval.enable")}</span>
+        <span className={cfg.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onChange({ enabled: !cfg.enabled })} />
+      </div>
+      <div className="web-field">
+        <label className="field-label">{t("eval.key")}</label>
+        <input className="text-input" type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} placeholder={hasKey ? t("settings.stored") : "nvapi-..."} />
+        <button type="button" className="web-save" onClick={save}><Check size={16} /><span>{t("settings.saveKey")}</span></button>
+        <button type="button" className="eval-link" onClick={() => api.openExternal("https://build.nvidia.com/settings/api-keys")}>{t("eval.getKey")}</button>
+      </div>
+      <div className="eval-section-label">{t("eval.params")}</div>
+      <div className="eval-grid">
+        <div className="eval-field">
+          <label className="field-label">{t("eval.temperature")}</label>
+          <input className="text-input" type="number" min="0.01" max="1" step="0.05" value={cfg.temperature} onChange={(event) => onChange({ temperature: num(event.target.value, 0.01, 1, 0.2) })} />
+        </div>
+        <div className="eval-field">
+          <label className="field-label">{t("eval.topP")}</label>
+          <input className="text-input" type="number" min="0.01" max="1" step="0.05" value={cfg.topP} onChange={(event) => onChange({ topP: num(event.target.value, 0.01, 1, 1) })} />
+          <small className="eval-hint">{t("eval.topPHint")}</small>
+        </div>
+        <div className="eval-field">
+          <label className="field-label">{t("eval.maxTokens")}</label>
+          <input className="text-input" type="number" min="1" max="65536" step="1024" value={cfg.maxTokens} onChange={(event) => onChange({ maxTokens: Math.round(num(event.target.value, 1, 65536, 16384)) })} />
+          <small className="eval-hint">{t("eval.maxHint")}</small>
+        </div>
+        <div className="eval-field">
+          <label className="field-label">{t("eval.budget")}</label>
+          <input className="text-input" type="number" min="-1" max="32768" step="1024" value={cfg.reasoningBudget} onChange={(event) => onChange({ reasoningBudget: Math.round(num(event.target.value, -1, 32768, 16384)) })} />
+          <small className="eval-hint">{t("eval.budgetHint")}</small>
+        </div>
+      </div>
+      <div className="eval-section-label">{t("eval.models")}</div>
+      <ul className="eval-models">
+        {nvModels.map((model) => (
+          <li key={model.id}>
+            <span className="eval-model-name">{model.label}</span>
+            <code>{model.apiId}</code>
+            <span className="eval-model-efforts">{(model.efforts || []).map((item) => EFFORT_LABEL[item] || item).join(" / ")}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
+const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, onPersonality, onSaveInstructions, onMemChange, onResetMemory, models, nvidia, hasNvidiaKey, onNvidiaChange, onSaveNvidiaKey }) => {
   const [tab, setTab] = useState("general");
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -3840,6 +4260,7 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
           <button className={tab === "mcp" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("mcp")}><Plug size={15} /><span>{t("settings.tabMcp")}</span></button>
           <button className={tab === "websearch" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("websearch")}><GlobeCheckIcon size={15} /><span>{t("settings.tabWebSearch")}</span></button>
           <button className={tab === "personalization" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("personalization")}><ShapesIcon size={15} /><span>{t("settings.tabPersonalization")}</span></button>
+          <button className={tab === "modeleval" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("modeleval")}><GripIcon size={15} /><span>{t("settings.tabModelEval")}</span></button>
         </div>
         <div className="settings-content">
           {tab === "general" ? (
@@ -3864,6 +4285,8 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
             </>
           ) : tab === "websearch" ? (
             <WebSearchSettings config={webSearch} hasKey={hasTavilyKey} onChange={onWebChange} onSaveKey={onSaveTavilyKey} />
+          ) : tab === "modeleval" ? (
+            <ModelEvalSettings config={nvidia} hasKey={hasNvidiaKey} models={models} onChange={onNvidiaChange} onSaveKey={onSaveNvidiaKey} />
           ) : (
             <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onResetMemory={onResetMemory} />
           )}

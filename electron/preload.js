@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("agentApi", {
   getBalance: () => ipcRenderer.invoke("key:balance"),
   extractMemories: (payload) => ipcRenderer.invoke("memory:extract", payload),
   resetMemories: () => ipcRenderer.invoke("memory:reset"),
+  generateChatTitle: (payload) => ipcRenderer.invoke("chat:title", payload),
   saveImage: (payload) => ipcRenderer.invoke("image:save", payload),
   analyzeImage: (payload) => ipcRenderer.invoke("image:analyze", payload),
   loadImage: (name) => ipcRenderer.invoke("image:load", name),
