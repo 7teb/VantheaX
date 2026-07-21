@@ -79,8 +79,14 @@ check("case-insensitive duplicates are dropped", dupe.ok && eq(dupe.lines, ["A f
 const dupeAfterPunct = parseNarratorLines('["Reading the config"]', ["Reading the config."]);
 check("a duplicate is detected after the period is appended", dupeAfterPunct.ok && eq(dupeAfterPunct.lines, []), JSON.stringify(dupeAfterPunct));
 
-const many = parseNarratorLines('["One.", "Two.", "Three.", "Four.", "Five."]', []);
-check("more than three lines cap at three", many.ok && eq(many.lines, ["One.", "Two.", "Three."]), JSON.stringify(many));
+const many = parseNarratorLines('["One.", "Two.", "Three.", "Four.", "Five.", "Six."]', []);
+check("more than five lines cap at five", many.ok && eq(many.lines, ["One.", "Two.", "Three.", "Four.", "Five."]), JSON.stringify(many));
+
+const action = parseNarratorLines('["Writing the expression parser...", "Tracing through the division cases..."]', []);
+check("action lines keep their trailing ellipsis", action.ok && eq(action.lines, ["Writing the expression parser...", "Tracing through the division cases..."]), JSON.stringify(action));
+
+const unicodeEllipsis = parseNarratorLines('["Writing the main loop…"]', []);
+check("a unicode ellipsis becomes three dots", unicodeEllipsis.ok && eq(unicodeEllipsis.lines, ["Writing the main loop..."]), JSON.stringify(unicodeEllipsis));
 
 const mixed = parseNarratorLines('["Real line.", 42, null, {"a":1}, "  ", "Second real line."]', []);
 check("non-string and empty entries are dropped", mixed.ok && eq(mixed.lines, ["Real line.", "Second real line."]), JSON.stringify(mixed));

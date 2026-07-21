@@ -1,6 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { Terminal as XTerm } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import MarkdownMessage from "./Markdown.jsx";
 import "./styles.css";
 
@@ -204,12 +207,13 @@ const STRINGS = {
     "perso.memResetSub": "Delete all VantheaX memories",
     "perso.memResetBtn": "Reset",
     "perso.memResetDone": "Done",
-    "perso.narrator": "Thinking narration (experimental)",
+    "perso.narrator": "Thinking narration",
     "perso.narratorSub": "Replace the plain \"Thinking\" with short live lines about what the model is working out",
     "perso.narratorEnable": "Narrate thinking",
-    "perso.narratorEnableSub": "A second model (Gemini Flash Lite via your OpenRouter key) reads the model's raw reasoning as it streams and writes the lines. Reasoning can contain your project code and prompts, so enabling this sends that data to a second model. Off means nothing extra is sent.",
+    "perso.narratorEnableSub": "Shows the model's reasoning",
     "toollabel.webSearch": "Searching the web",
     "toollabel.analyzeImage": "Analyzing image",
+    "toollabel.datetime": "Checking the date and time",
     "web.enable": "Enable web search",
     "web.key": "Tavily API key",
     "web.results": "Results per search",
@@ -220,6 +224,21 @@ const STRINGS = {
     "web.topicGeneral": "General",
     "web.topicNews": "News",
     "web.sources": "Sources",
+    "web.searchingFor": "Searching for {q}",
+    "web.checkingSite": "Searching {site}",
+    "web.searchedFor": "Searched for {q}",
+    "panels.title": "Panels",
+    "panels.openRoot": "Open the project folder",
+    "terminal.title": "Terminal",
+    "terminal.titleN": "Terminal {n}",
+    "terminal.open": "Terminal",
+    "terminal.new": "New terminal",
+    "terminal.close": "Close terminal",
+    "terminal.closeTab": "Close tab",
+    "terminal.fullscreen": "Fullscreen",
+    "terminal.exitFullscreen": "Exit fullscreen",
+    "terminal.exited": "process exited with code {code}",
+    "terminal.resize": "Drag to resize",
     "fc.undo": "Undo",
     "fc.review": "Review",
     "fc.reverted": "Reverted",
@@ -494,12 +513,13 @@ const STRINGS = {
     "perso.memResetSub": "Alle VantheaX-Erinnerungen löschen",
     "perso.memResetBtn": "Zurücksetzen",
     "perso.memResetDone": "Erledigt",
-    "perso.narrator": "Denk-Kommentar (experimentell)",
+    "perso.narrator": "Denk-Kommentar",
     "perso.narratorSub": "Ersetzt das schlichte \"Denkt nach\" durch kurze Live-Zeilen dazu, was das Modell gerade durchdenkt",
     "perso.narratorEnable": "Denken kommentieren",
-    "perso.narratorEnableSub": "Ein zweites Modell (Gemini Flash Lite über deinen OpenRouter-Key) liest das rohe Reasoning des Modells live mit und schreibt die Zeilen. Reasoning kann Projekt-Code und Prompts enthalten, mit dem Schalter gehen diese Daten also an ein zweites Modell. Aus heißt: nichts Zusätzliches wird gesendet.",
+    "perso.narratorEnableSub": "Zeigt das Reasoning des Modells",
     "toollabel.webSearch": "Durchsucht das Web",
     "toollabel.analyzeImage": "Bild wird analysiert",
+    "toollabel.datetime": "Prüft Datum und Uhrzeit",
     "web.enable": "Websuche aktivieren",
     "web.key": "Tavily-API-Key",
     "web.results": "Treffer pro Suche",
@@ -510,6 +530,21 @@ const STRINGS = {
     "web.topicGeneral": "Allgemein",
     "web.topicNews": "News",
     "web.sources": "Quellen",
+    "web.searchingFor": "Sucht nach {q}",
+    "web.checkingSite": "{site} wird durchsucht",
+    "web.searchedFor": "Nach {q} gesucht",
+    "panels.title": "Panels",
+    "panels.openRoot": "Projektordner öffnen",
+    "terminal.title": "Terminal",
+    "terminal.titleN": "Terminal {n}",
+    "terminal.open": "Terminal",
+    "terminal.new": "Neues Terminal",
+    "terminal.close": "Terminal schließen",
+    "terminal.closeTab": "Tab schließen",
+    "terminal.fullscreen": "Vollbild",
+    "terminal.exitFullscreen": "Vollbild verlassen",
+    "terminal.exited": "Prozess mit Code {code} beendet",
+    "terminal.resize": "Zum Anpassen ziehen",
     "fc.undo": "Rückgängig machen",
     "fc.review": "Überprüfen",
     "fc.reverted": "Rückgängig gemacht",
@@ -889,8 +924,13 @@ const STREAM_STALL_CHECK = 2000;
 
 const NARRATE_TYPE_CPS = 45;
 const NARRATE_MIN_HOLD_MS = 2400;
+const NARRATE_ACTION_HOLD_MS = 20000;
 const NARRATE_FIRST_LINE_MIN_MS = 2500;
-const NARRATE_QUEUE_MAX = 3;
+const NARRATE_FADE_MS = 700;
+const NARRATE_QUEUE_MAX = 5;
+
+// a trailing ellipsis means the model is still doing the thing, so the line waits it out
+const narrateHoldFor = (text) => (text.endsWith("...") ? NARRATE_ACTION_HOLD_MS : NARRATE_MIN_HOLD_MS);
 
 const narrationStore = (() => {
   const subs = new Set();
@@ -903,10 +943,12 @@ const narrationStore = (() => {
     typed: 0,
     startedAt: 0,
     holdUntil: 0,
+    clearUntil: 0,
     appliedTick: 0,
     suppressedTick: -1,
     seenAppliedToolIds: new Set(),
     suppressedByProgress: false,
+    fading: false,
     raf: 0,
     carry: 0,
     lastFrame: 0,
@@ -924,7 +966,7 @@ const narrationStore = (() => {
     }
   };
 
-  const eligible = () => !s.suppressedByProgress && s.queue.length > 0 && s.queue[0].tick === s.appliedTick;
+  const eligible = () => !s.suppressedByProgress && !s.fading && s.queue.length > 0 && s.queue[0].tick === s.appliedTick;
 
   const park = () => {
     if (s.raf) {
@@ -939,7 +981,9 @@ const narrationStore = (() => {
     s.current = next.text;
     s.typed = 1;
     s.startedAt = now;
+    s.fading = false;
     s.holdUntil = next.text.length <= 1 ? now + NARRATE_MIN_HOLD_MS : 0;
+    s.clearUntil = next.text.length <= 1 ? now + narrateHoldFor(next.text) : 0;
     s.carry = 0;
     s.lastFrame = now;
     s.firstLineDone = true;
@@ -962,13 +1006,15 @@ const narrationStore = (() => {
         s.typed = Math.min(s.current.length, s.typed + take);
         if (s.typed >= s.current.length) {
           s.holdUntil = now + NARRATE_MIN_HOLD_MS;
+          s.clearUntil = now + (s.fading ? NARRATE_FADE_MS : narrateHoldFor(s.current));
         }
       }
     } else if (now >= s.holdUntil && eligible()) {
       startLine(now);
-    } else if (now >= s.holdUntil) {
+    } else if (now >= s.clearUntil) {
       s.current = "";
       s.typed = 0;
+      s.fading = false;
     }
     emit();
     if (s.current || eligible()) {
@@ -989,10 +1035,12 @@ const narrationStore = (() => {
     s.typed = 0;
     s.startedAt = 0;
     s.holdUntil = 0;
+    s.clearUntil = 0;
     s.appliedTick = 0;
     s.suppressedTick = -1;
     s.seenAppliedToolIds = new Set();
     s.suppressedByProgress = false;
+    s.fading = false;
     s.firstLineDone = false;
     s.carry = 0;
     s.lastFrame = 0;
@@ -1035,6 +1083,7 @@ const narrationStore = (() => {
         s.queue = s.queue.filter((item) => item.tick >= s.appliedTick);
         s.current = "";
         s.typed = 0;
+        s.fading = false;
         emit();
       }
       kick();
@@ -1046,8 +1095,14 @@ const narrationStore = (() => {
       s.suppressedByProgress = false;
       s.suppressedTick = s.appliedTick;
       s.queue = s.queue.filter((item) => item.tick !== s.appliedTick);
-      s.current = "";
-      s.typed = 0;
+      // let a half-typed line finish its sentence instead of snapping to "Thinking" mid-word
+      if (s.current && s.typed < s.current.length) {
+        s.fading = true;
+      } else {
+        s.current = "";
+        s.typed = 0;
+        s.fading = false;
+      }
       emit();
       kick();
     },
@@ -1058,6 +1113,7 @@ const narrationStore = (() => {
       s.suppressedByProgress = true;
       s.current = "";
       s.typed = 0;
+      s.fading = false;
       emit();
     },
     reset(requestId) {
@@ -1080,6 +1136,7 @@ const narrationStore = (() => {
 })();
 
 const useNarrationLine = () => useSyncExternalStore(narrationStore.subscribe, narrationStore.getLine);
+const useLiveLabel = () => useNarrationLine() || t("work.thinking");
 
 const createStreamPacer = (apply) => {
   const queue = [];
@@ -1242,7 +1299,13 @@ const App = () => {
   const [projectPath, setProjectPath] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
   const [resendText, setResendText] = useState(null);
-  const [contextOrbOpen, setContextOrbOpen] = useState(false);
+  const [rightPanel, setRightPanel] = useState("");
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalFull, setTerminalFull] = useState(false);
+  const [termTabs, setTermTabs] = useState([]);
+  const [termActive, setTermActive] = useState(0);
+  const [termWidth, setTermWidth] = useState(() => Math.round((typeof window !== "undefined" ? window.innerWidth : 1280) * 0.42));
+  const termSeq = useRef(0);
   const [contextUsage, setContextUsage] = useState(null);
   const [pendingCompact, setPendingCompact] = useState(null);
   const [compressing, setCompressing] = useState(false);
@@ -1275,7 +1338,6 @@ const App = () => {
   const [goalMode, setGoalMode] = useState(false);
   const [goalText, setGoalText] = useState("");
   const [todos, setTodos] = useState([]);
-  const [todoPanelOpen, setTodoPanelOpen] = useState(false);
   const [goalDone, setGoalDone] = useState(false);
   const [pendingPermission, setPendingPermission] = useState(null);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
@@ -1388,7 +1450,7 @@ const App = () => {
         setProjectMenuOpen(false);
         setSettingsOpen(false);
         setChatMenuOpen(false);
-        setContextOrbOpen(false);
+        setRightPanel("");
         setTitleMenuOpen(null);
         setInspectorOpen(false);
         setEditingMessageId("");
@@ -1399,7 +1461,7 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!plusMenuOpen && !brandMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !contextOrbOpen && titleMenuOpen === null) {
+    if (!plusMenuOpen && !brandMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !rightPanel && titleMenuOpen === null) {
       return;
     }
     const onDown = (event) => {
@@ -1409,8 +1471,8 @@ const App = () => {
       if (!event.target.closest(".titlebar-menu")) {
         setTitleMenuOpen(null);
       }
-      if (!event.target.closest(".context-panel") && !event.target.closest(".context-orb")) {
-        setContextOrbOpen(false);
+      if (!event.target.closest(".context-panel") && !event.target.closest(".todo-panel") && !event.target.closest(".panel-switch")) {
+        setRightPanel("");
       }
       if (!event.target.closest(".plus-picker")) {
         setPlusMenuOpen(false);
@@ -1430,7 +1492,7 @@ const App = () => {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [plusMenuOpen, brandMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, contextOrbOpen, titleMenuOpen]);
+  }, [plusMenuOpen, brandMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, rightPanel, titleMenuOpen]);
 
   useEffect(() => {
     if (!chatsLoadedRef.current) {
@@ -1488,6 +1550,14 @@ const App = () => {
       persistSettings({ model: fallback.id, effort: fallback.defaultEffort || "" });
     }
   }, [models, visibleModels, settings.model]);
+
+  useEffect(() => {
+    const selected = models.find((model) => model.id === settings.model);
+    if (!selected?.efforts?.length || !settings.effort || selected.efforts.includes(settings.effort)) {
+      return;
+    }
+    persistSettings({ effort: selected.defaultEffort || selected.efforts[0] });
+  }, [models, settings.model, settings.effort]);
 
   const searchedChats = useMemo(() => {
     const text = chatQuery.trim().toLowerCase();
@@ -1782,7 +1852,7 @@ const App = () => {
         setSidebarCollapsed((value) => !value);
       } else if (k === "j") {
         event.preventDefault();
-        setTodoPanelOpen((value) => !value);
+        setRightPanel((value) => (value === "tasks" ? "" : "tasks"));
       } else if (k === "f") {
         event.preventDefault();
         setSearchOpen(true);
@@ -1903,7 +1973,7 @@ const App = () => {
   };
 
   const runContextCompaction = async (chatId) => {
-    setContextOrbOpen(false);
+    setRightPanel("");
     const chat = chatId ? (chats.find((c) => c.id === chatId) || null) : activeChat;
     if (!chat || compactingRef.current) {
       return;
@@ -1927,20 +1997,96 @@ const App = () => {
   const requestCompact = () => {
     if (busy) {
       setPendingCompact(activeChat?.id || null);
-      setContextOrbOpen(false);
+      setRightPanel("");
       return;
     }
     runContextCompaction();
   };
 
-  const toggleContextOrb = () => {
-    const next = !contextOrbOpen;
-    setContextOrbOpen(next);
-    if (next) {
-      setTodoPanelOpen(false);
+  const openRightPanel = (view) => {
+    setRightPanel(view);
+    if (view === "context") {
       refreshContextUsage();
     }
   };
+
+  const addTermTab = () => {
+    termSeq.current += 1;
+    const id = termSeq.current;
+    setTermTabs((tabs) => [...tabs, { id }]);
+    setTermActive(id);
+    return id;
+  };
+
+  const toggleTerminal = () => {
+    if (terminalOpen) {
+      setTerminalOpen(false);
+      setTerminalFull(false);
+      return;
+    }
+    setInspectorOpen(false);
+    if (!termTabs.length) {
+      addTermTab();
+    }
+    setTerminalOpen(true);
+  };
+
+  const closeTermTab = (id) => {
+    setTermTabs((tabs) => {
+      const next = tabs.filter((tab) => tab.id !== id);
+      if (!next.length) {
+        setTerminalOpen(false);
+        setTerminalFull(false);
+      } else {
+        setTermActive((current) => (current === id ? next[next.length - 1].id : current));
+      }
+      return next;
+    });
+  };
+
+  const closeTerminal = () => {
+    setTerminalOpen(false);
+    setTerminalFull(false);
+    setTermTabs([]);
+  };
+
+  const clampTermWidth = (width, rect) => {
+    const rail = sidebarCollapsed ? 0 : 300;
+    const max = Math.max(360, rect.width - rail - 360);
+    return Math.round(Math.max(320, Math.min(max, width)));
+  };
+
+  const startTermResize = (event) => {
+    event.preventDefault();
+    const shell = document.querySelector(".app-shell");
+    if (!shell) {
+      return;
+    }
+    const rect = shell.getBoundingClientRect();
+    const onMove = (moveEvent) => setTermWidth(clampTermWidth(rect.right - moveEvent.clientX, rect));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.classList.remove("col-resizing");
+    };
+    document.body.classList.add("col-resizing");
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  useEffect(() => {
+    if (!terminalOpen) {
+      return;
+    }
+    const onResize = () => {
+      const shell = document.querySelector(".app-shell");
+      if (shell) {
+        setTermWidth((current) => clampTermWidth(current, shell.getBoundingClientRect()));
+      }
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [terminalOpen, sidebarCollapsed]);
 
   useEffect(() => {
     if (!busy) {
@@ -2335,7 +2481,7 @@ const App = () => {
   };
 
   return (
-    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"}`}>
+    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
       <header className="titlebar">
         <div className="titlebar-left">
           <button className="chrome-button sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? t("title.sidebarOpen") : t("title.sidebarClose")}>
@@ -2353,7 +2499,7 @@ const App = () => {
             settings: () => setSettingsOpen(true),
             closeWindow: () => api.closeWindow(),
             toggleSidebar: () => setSidebarCollapsed((value) => !value),
-            toggleTasks: () => setTodoPanelOpen((value) => !value),
+            toggleTasks: () => setRightPanel((value) => (value === "tasks" ? "" : "tasks")),
             search: () => setSearchOpen(true),
             prevChat: () => navigateChat(-1),
             nextChat: () => navigateChat(1),
@@ -2449,10 +2595,15 @@ const App = () => {
         </aside>
 
         <main className={messages.length ? "chat-panel has-messages" : "chat-panel is-empty"}>
-          <ContextOrb usage={contextUsage} open={contextOrbOpen} onToggle={toggleContextOrb} />
-          <ContextPanel usage={contextUsage} open={contextOrbOpen} onCompact={requestCompact} pendingCompact={pendingCompact} />
-          <button className={todoPanelOpen ? "todo-toggle is-on" : "todo-toggle"} onClick={() => { setTodoPanelOpen(!todoPanelOpen); setContextOrbOpen(false); }} title={t("todo.tasks")}><ListIcon size={16} /></button>
-          <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={todoPanelOpen} />
+          <button className={terminalOpen ? "terminal-toggle is-on" : "terminal-toggle"} onClick={toggleTerminal} title={t("terminal.open")}>
+            <Terminal size={16} />
+          </button>
+          <button className="root-open-button" onClick={() => api.openRoot(projectPath, activeChat?.workspaceName || "")} title={t("panels.openRoot")}>
+            <ListTreeIcon size={16} />
+          </button>
+          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} usage={contextUsage} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
+          <ContextPanel usage={contextUsage} open={rightPanel === "context"} onCompact={requestCompact} pendingCompact={pendingCompact} />
+          <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={rightPanel === "tasks"} />
           {messages.length > 0 && (
             <header className="chat-header">
               {renamingChatId && renamingChatId === activeChat?.id ? (
@@ -2556,7 +2707,7 @@ const App = () => {
           </div>
         </main>
 
-        {inspectorOpen && (
+        {inspectorOpen && !terminalOpen && (
           <aside className="inspector">
             <div className="panel-header compact">
               <div>
@@ -2566,6 +2717,23 @@ const App = () => {
             </div>
             <pre className="file-preview">{selectedContent || t("inspector.previewHint")}</pre>
           </aside>
+        )}
+        {terminalOpen && !terminalFull && (
+          <div className="terminal-resizer" onMouseDown={startTermResize} title={t("terminal.resize")} />
+        )}
+        {terminalOpen && (
+          <TerminalPanel
+            tabs={termTabs}
+            activeId={termActive}
+            full={terminalFull}
+            projectPath={projectPath}
+            workspaceName={activeChat?.workspaceName || ""}
+            onNewTab={addTermTab}
+            onCloseTab={closeTermTab}
+            onSelectTab={setTermActive}
+            onToggleFull={() => setTerminalFull((value) => !value)}
+            onClose={closeTerminal}
+          />
         )}
       </div>
 
@@ -2952,19 +3120,206 @@ const estTokens = (text) => {
   return Math.ceil(s.length / 4 + (bytes - s.length) / 2);
 };
 
-const ContextOrb = ({ usage, open, onToggle }) => {
+const ContextRing = ({ pct }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="9" className="context-orb-track" />
+    <circle cx="12" cy="12" r="9" className="context-orb-fill" pathLength="100" style={{ strokeDasharray: 100, strokeDashoffset: 100 - pct * 100 }} />
+  </svg>
+);
+
+const ListTreeIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M8 5h13" /><path d="M13 12h8" /><path d="M13 19h8" />
+    <path d="M3 10a2 2 0 0 0 2 2h3" /><path d="M3 5v12a2 2 0 0 0 2 2h3" />
+  </svg>
+);
+
+const PanelSwitch = ({ open, active, usage, todos, onToggle, onPick }) => {
   const budget = usage?.budget || 512000;
   const total = usage?.total || 0;
   const pct = budget > 0 ? Math.min(1, total / budget) : 0;
+  const done = todos.filter((item) => item.done).length;
   return (
-    <button className={open ? "context-orb is-open" : "context-orb"} onClick={onToggle} title={t("context.title")}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="9" className="context-orb-track" />
-        <circle cx="12" cy="12" r="9" className="context-orb-fill" pathLength="100" style={{ strokeDasharray: 100, strokeDashoffset: 100 - pct * 100 }} />
-      </svg>
-    </button>
+    <div className="panel-switch">
+      <button className={open || active ? "panel-switch-button is-on" : "panel-switch-button"} onClick={onToggle} title={t("panels.title")}>
+        <MoreVertical size={17} />
+      </button>
+      <div className={open ? "panel-menu open" : "panel-menu"}>
+        <button className={active === "context" ? "brand-menu-row is-active" : "brand-menu-row"} onClick={() => onPick("context")}>
+          <span className="brand-menu-icon"><ContextRing pct={pct} /></span>
+          <span className="brand-menu-text">
+            <span className="brand-menu-title">{t("context.title")}</span>
+            <span className="brand-menu-desc">{formatTokens(total)} / {formatTokens(budget)}</span>
+          </span>
+        </button>
+        <button className={active === "tasks" ? "brand-menu-row is-active" : "brand-menu-row"} onClick={() => onPick("tasks")}>
+          <span className="brand-menu-icon"><ListIcon size={17} /></span>
+          <span className="brand-menu-text">
+            <span className="brand-menu-title">{t("todo.tasks")}</span>
+            <span className="brand-menu-desc">{todos.length ? `${done} / ${todos.length}` : t("todo.none")}</span>
+          </span>
+        </button>
+      </div>
+    </div>
   );
 };
+
+const xtermTheme = {
+  background: "#161514",
+  foreground: "#e4ddd4",
+  cursor: "#e4ddd4",
+  cursorAccent: "#161514",
+  selectionBackground: "rgba(255,255,255,.18)",
+  black: "#161514",
+  brightBlack: "#6c655d",
+  red: "#e06c75",
+  brightRed: "#e06c75",
+  green: "#8bbd6a",
+  brightGreen: "#a6d189",
+  yellow: "#d6b25e",
+  brightYellow: "#e2c275",
+  blue: "#61a0d6",
+  brightBlue: "#7fb6e6",
+  magenta: "#c98bd0",
+  brightMagenta: "#d7a6dc",
+  cyan: "#5fb3b3",
+  brightCyan: "#7fc9c9",
+  white: "#d7d0c8",
+  brightWhite: "#f3eee8",
+};
+
+const TerminalView = ({ tabId, active, projectPath, workspaceName }) => {
+  const holderRef = useRef(null);
+  const termRef = useRef(null);
+  const fitRef = useRef(null);
+  const ptyRef = useRef(null);
+  useEffect(() => {
+    const term = new XTerm({
+      fontSize: 13,
+      // concrete stack, no CSS var: xterm measures glyph width on a canvas and cannot resolve var(), which collapses to a proportional fallback and spaces every character out
+      fontFamily: '"JetBrains Mono", "Cascadia Mono", Consolas, "Courier New", ui-monospace, monospace',
+      letterSpacing: 0,
+      lineHeight: 1.15,
+      theme: xtermTheme,
+      cursorBlink: true,
+      scrollback: 5000,
+      allowProposedApi: true,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(holderRef.current);
+    // DOM renderer on purpose: the WebGL addon corrupts its glyph atlas when a tab is hidden and shown again
+    try {
+      fit.fit();
+    } catch {}
+    termRef.current = term;
+    fitRef.current = fit;
+    let disposed = false;
+    // the web font may still be loading when xterm took its first measurement, remeasure once it lands
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => {
+        if (disposed) {
+          return;
+        }
+        try {
+          term.refresh(0, term.rows - 1);
+          fit.fit();
+          if (ptyRef.current != null) {
+            api.terminalResize(ptyRef.current, term.cols, term.rows);
+          }
+        } catch {}
+      });
+    }
+    const offData = api.onTerminalData((msg) => {
+      if (msg.id === ptyRef.current) {
+        term.write(msg.data);
+      }
+    });
+    const offExit = api.onTerminalExit((msg) => {
+      if (msg.id === ptyRef.current) {
+        term.write(`\r\n\x1b[38;5;244m${t("terminal.exited", { code: msg.exitCode })}\x1b[0m\r\n`);
+      }
+    });
+    api.terminalCreate({ cols: term.cols, rows: term.rows, projectPath, workspaceName }).then((res) => {
+      if (disposed) {
+        if (res && res.id) {
+          api.terminalClose(res.id);
+        }
+        return;
+      }
+      ptyRef.current = res.id;
+      term.onData((data) => api.terminalInput(ptyRef.current, data));
+    });
+    const ro = new ResizeObserver(() => {
+      try {
+        fit.fit();
+        if (ptyRef.current != null) {
+          api.terminalResize(ptyRef.current, term.cols, term.rows);
+        }
+      } catch {}
+    });
+    ro.observe(holderRef.current);
+    return () => {
+      disposed = true;
+      offData();
+      offExit();
+      ro.disconnect();
+      if (ptyRef.current != null) {
+        api.terminalClose(ptyRef.current);
+      }
+      term.dispose();
+    };
+  }, []);
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+        const term = termRef.current;
+        if (term) {
+          term.refresh(0, term.rows - 1);
+          term.focus();
+          if (ptyRef.current != null) {
+            api.terminalResize(ptyRef.current, term.cols, term.rows);
+          }
+        }
+      } catch {}
+    });
+    return () => cancelAnimationFrame(id);
+  }, [active]);
+  return <div ref={holderRef} className={active ? "terminal-view is-active" : "terminal-view"} onMouseDown={() => termRef.current?.focus()} />;
+};
+
+const TerminalPanel = ({ tabs, activeId, full, projectPath, workspaceName, onNewTab, onCloseTab, onSelectTab, onToggleFull, onClose }) => (
+  <aside className="terminal-panel">
+    <div className="terminal-head">
+      <div className="terminal-tabs">
+        {tabs.map((tab, index) => (
+          <div key={tab.id} className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} onMouseDown={() => onSelectTab(tab.id)}>
+            <span className="terminal-tab-label">{tabs.length > 1 ? t("terminal.titleN", { n: index + 1 }) : t("terminal.title")}</span>
+            {tabs.length > 1 && (
+              <button className="terminal-tab-close" title={t("terminal.closeTab")} onMouseDown={(event) => { event.stopPropagation(); onCloseTab(tab.id); }}><X size={12} /></button>
+            )}
+          </div>
+        ))}
+        <button className="terminal-add" title={t("terminal.new")} onClick={onNewTab}><Plus size={14} /></button>
+      </div>
+      <div className="terminal-actions">
+        <button className="terminal-action" title={full ? t("terminal.exitFullscreen") : t("terminal.fullscreen")} onClick={onToggleFull}>
+          {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
+        <button className="terminal-action terminal-action-close" title={t("terminal.close")} onClick={onClose}><X size={16} /></button>
+      </div>
+    </div>
+    <div className="terminal-views">
+      {tabs.map((tab) => (
+        <TerminalView key={tab.id} tabId={tab.id} active={tab.id === activeId} projectPath={projectPath} workspaceName={workspaceName} />
+      ))}
+    </div>
+  </aside>
+);
 
 const ContextPanel = ({ usage, open, onCompact, pendingCompact }) => {
   const budget = usage?.budget || 512000;
@@ -3189,8 +3544,7 @@ const PlanBlockedNote = ({ tool, hasPlan }) => (
 );
 
 const Thinking = () => {
-  const line = useNarrationLine();
-  const label = line || t("work.thinking");
+  const label = useLiveLabel();
   return (
     <div className="thinking">
       <span className="live-label" data-shimmer-label={label}>{label}</span>
@@ -3605,6 +3959,27 @@ const WebSearchStep = ({ tool }) => {
   const answer = result.answer || "";
   const sources = Array.isArray(result.sources) ? result.sources : [];
   const label = t("toollabel.webSearch");
+  if (result.depth === "basic") {
+    if (result.error) {
+      return (
+        <div className="tool-step web-search-basic failed">
+          <span className="step-marker"><Globe size={14} /></span>
+          <span className="step-label">{result.error}</span>
+        </div>
+      );
+    }
+    const line = result.running
+      ? (result.site ? t("web.checkingSite", { site: result.site }) : t("web.searchingFor", { q: query }))
+      : t("web.searchedFor", { q: query });
+    return (
+      <div className="tool-step web-search-basic">
+        <span className="step-marker"><Globe size={14} /></span>
+        {result.running
+          ? <span className="step-label live-label" data-shimmer-label={line}>{line}</span>
+          : <span className="step-label">{line}</span>}
+      </div>
+    );
+  }
   if (result.running) {
     return (
       <div className="tool-step web-search-running">
@@ -3647,8 +4022,7 @@ const WebSearchStep = ({ tool }) => {
 };
 
 const NarrationRow = () => {
-  const line = useNarrationLine();
-  const label = line || t("work.thinking");
+  const label = useLiveLabel();
   return (
     <div className="running-head narration-row">
       <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
@@ -3917,6 +4291,9 @@ const getToolLabel = (tool) => {
   const command = result.command || tool.args?.command;
   const path = tool.args?.path || tool.args?.file || result.path;
   const name = (tool.name || "").toLowerCase();
+  if (name === "datetime") {
+    return t("toollabel.datetime");
+  }
   if (name === "web_search") {
     return t("toollabel.webSearch");
   }

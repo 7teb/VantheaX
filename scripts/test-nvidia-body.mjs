@@ -40,27 +40,22 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const EXPECTED = [
   ["nvidia:deepseek-ai/deepseek-v4-flash", "deepseek-ai/deepseek-v4-flash", 16384, 0.95, {
-    none: { reasoning_effort: "none" },
     high: { reasoning_effort: "high" },
     max: { reasoning_effort: "max" },
   }],
   ["nvidia:deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-pro", 16384, 0.95, {
-    none: { reasoning_effort: "none" },
     high: { reasoning_effort: "high" },
     max: { reasoning_effort: "max" },
   }],
   ["nvidia:z-ai/glm-5.2", "z-ai/glm-5.2", 32768, 1, {
-    off: { chat_template_kwargs: { enable_thinking: false } },
     high: { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "high" } },
     max: { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "max" } },
   }],
   ["nvidia:minimaxai/minimax-m3", "minimaxai/minimax-m3", 16384, 0.95, {
-    disabled: { chat_template_kwargs: { thinking_mode: "disabled" } },
     adaptive: { chat_template_kwargs: { thinking_mode: "adaptive" } },
     enabled: { chat_template_kwargs: { thinking_mode: "enabled" } },
   }],
   ["nvidia:nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-ultra-550b-a55b", 32768, 0.95, {
-    none: { reasoning_effort: "none" },
     medium: { reasoning_effort: "medium" },
     high: { reasoning_effort: "high" },
   }],
@@ -141,6 +136,8 @@ check("five nvidia models in the catalog", nvidiaIds.length === 5, String(nvidia
 check("nvidia catalog ids are namespaced", nvidiaIds.every((m) => m.id.startsWith("nvidia:")));
 check("nvidia ids do not collide with openrouter ids", new Set(catalog.map((m) => m.id)).size === catalog.length);
 check("every nvidia model maps every effort", nvidiaIds.every((m) => m.efforts.every((e) => m.effortMap && m.effortMap[e])));
+check("no nvidia model offers a reasoning-off level", nvidiaIds.every((m) => !m.efforts.some((e) => ["none", "off", "disabled"].includes(e))), nvidiaIds.map((m) => m.efforts.join("/")).join(" | "));
+check("no nvidia effortMap can disable thinking", nvidiaIds.every((m) => Object.values(m.effortMap).every((frag) => frag.reasoning_effort !== "none" && frag.chat_template_kwargs?.enable_thinking !== false && frag.chat_template_kwargs?.thinking_mode !== "disabled")));
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

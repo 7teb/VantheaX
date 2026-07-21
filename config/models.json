@@ -61,10 +61,9 @@
     "label": "DeepSeek V4 Flash",
     "provider": "Nvidia",
     "providerKey": "nvidia",
-    "efforts": ["none", "high", "max"],
+    "efforts": ["high", "max"],
     "defaultEffort": "high",
     "effortMap": {
-      "none": { "reasoning_effort": "none" },
       "high": { "reasoning_effort": "high" },
       "max": { "reasoning_effort": "max" }
     },
@@ -79,10 +78,9 @@
     "label": "DeepSeek V4 Pro",
     "provider": "Nvidia",
     "providerKey": "nvidia",
-    "efforts": ["none", "high", "max"],
+    "efforts": ["high", "max"],
     "defaultEffort": "high",
     "effortMap": {
-      "none": { "reasoning_effort": "none" },
       "high": { "reasoning_effort": "high" },
       "max": { "reasoning_effort": "max" }
     },
@@ -97,10 +95,9 @@
     "label": "GLM 5.2",
     "provider": "Nvidia",
     "providerKey": "nvidia",
-    "efforts": ["off", "high", "max"],
+    "efforts": ["high", "max"],
     "defaultEffort": "max",
     "effortMap": {
-      "off": { "chat_template_kwargs": { "enable_thinking": false } },
       "high": { "chat_template_kwargs": { "enable_thinking": true, "reasoning_effort": "high" } },
       "max": { "chat_template_kwargs": { "enable_thinking": true, "reasoning_effort": "max" } }
     },
@@ -115,10 +112,9 @@
     "label": "MiniMax M3",
     "provider": "Nvidia",
     "providerKey": "nvidia",
-    "efforts": ["disabled", "adaptive", "enabled"],
+    "efforts": ["adaptive", "enabled"],
     "defaultEffort": "enabled",
     "effortMap": {
-      "disabled": { "chat_template_kwargs": { "thinking_mode": "disabled" } },
       "adaptive": { "chat_template_kwargs": { "thinking_mode": "adaptive" } },
       "enabled": { "chat_template_kwargs": { "thinking_mode": "enabled" } }
     },
@@ -133,10 +129,9 @@
     "label": "Nemotron 3 Ultra 550B",
     "provider": "Nvidia",
     "providerKey": "nvidia",
-    "efforts": ["none", "medium", "high"],
+    "efforts": ["medium", "high"],
     "defaultEffort": "high",
     "effortMap": {
-      "none": { "reasoning_effort": "none" },
       "medium": { "reasoning_effort": "medium" },
       "high": { "reasoning_effort": "high" }
     },

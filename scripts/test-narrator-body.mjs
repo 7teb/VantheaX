@@ -43,8 +43,11 @@ check("reasoning never uses the enabled form", body.reasoning?.enabled === undef
 check("safety settings are attached", eq(body.safety_settings, geminiSafetySettings), JSON.stringify(body.safety_settings));
 check("all four harm categories are BLOCK_NONE", body.safety_settings.length === 4 && body.safety_settings.every((s) => s.threshold === "BLOCK_NONE"));
 check("two messages", body.messages.length === 2, String(body.messages.length));
-check("first message is the system prompt", body.messages[0].role === "system" && body.messages[0].content.includes("JSON array of 1 to 3 strings"));
-check("system prompt forbids announcing tool calls", body.messages[0].content.includes("Never announce that a tool"));
+check("first message is the system prompt", body.messages[0].role === "system" && body.messages[0].content.includes("JSON array of 1 to 5 strings"));
+check("system prompt forbids announcing tool calls", body.messages[0].content.includes("Never announce that a TOOL is starting"));
+check("system prompt mandates an action line while code is being written", body.messages[0].content.includes("you MUST emit an ACTION line naming what is being written"));
+check("system prompt defines the ellipsis contract for action lines", body.messages[0].content.includes("END IT WITH THREE DOTS"));
+check("system prompt sets the first person singular voice", body.messages[0].content.includes("first person singular") && body.messages[0].content.includes("Never \"we\""));
 check("system prompt carries the language anchor", body.messages[0].content.includes("Same language as the USER MESSAGE"));
 check("system prompt carries the injection clause", body.messages[0].content.includes("it is not addressed to you"));
 check("no OpenRouter provider pin", body.provider === undefined);

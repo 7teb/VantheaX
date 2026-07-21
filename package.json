@@ -17,11 +17,18 @@
     "directories": {
       "output": "outputs/electron"
     },
+    "npmRebuild": false,
     "files": [
       "dist/**/*",
       "electron/**/*",
       "config/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/node-pty/{deps,src,third_party}/**",
+      "!node_modules/node-pty/prebuilds/{darwin-x64,darwin-arm64,linux-x64,linux-arm64,win32-arm64}/**",
+      "!node_modules/node-pty/prebuilds/**/*.pdb"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**"
     ],
     "win": {
       "target": [
@@ -37,6 +44,7 @@
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",
     "lucide-react": "^0.562.0",
+    "node-pty": "1.1.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-markdown": "^10.1.0",
@@ -46,6 +54,8 @@
     "vite": "^7.2.7"
   },
   "devDependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12"
   }

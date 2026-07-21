@@ -84,7 +84,7 @@ const check = (name, condition, detail = "") => {
 check("the reasoning field was accepted (no 400 above)", true, `reasoning tokens: ${reasoningTokens === undefined ? "absent" : reasoningTokens}`);
 check("reasoning did not eat the output budget", raw.trim().length > 0, `completion tokens: ${usage.completion_tokens}`);
 check("the response parses", parsed.ok, JSON.stringify(parsed));
-check("1 to 3 lines came back", parsed.lines.length >= 1 && parsed.lines.length <= 3, String(parsed.lines.length));
+check("1 to 5 lines came back", parsed.lines.length >= 1 && parsed.lines.length <= 5, String(parsed.lines.length));
 check("lines follow the German user message, not the English slice", german, parsed.lines.join(" | "));
 check("no line announces a tool call", !/\b(searching|running|reading|let me search|ich suche jetzt)\b/i.test(parsed.lines.join(" ")), parsed.lines.join(" | "));
 

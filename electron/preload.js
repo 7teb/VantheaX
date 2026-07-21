@@ -48,4 +48,19 @@ contextBridge.exposeInMainWorld("agentApi", {
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
   undoTurn: (turnId) => ipcRenderer.invoke("turn:undo", turnId),
   revealPath: (projectPath, relativePath) => ipcRenderer.invoke("shell:reveal", projectPath, relativePath),
+  openRoot: (projectPath, workspaceName) => ipcRenderer.invoke("shell:open-root", projectPath, workspaceName),
+  terminalCreate: (opts) => ipcRenderer.invoke("terminal:create", opts),
+  terminalInput: (id, data) => ipcRenderer.send("terminal:input", id, data),
+  terminalResize: (id, cols, rows) => ipcRenderer.send("terminal:resize", id, cols, rows),
+  terminalClose: (id) => ipcRenderer.send("terminal:close", id),
+  onTerminalData: (handler) => {
+    const listener = (_, payload) => handler(payload);
+    ipcRenderer.on("terminal:data", listener);
+    return () => ipcRenderer.removeListener("terminal:data", listener);
+  },
+  onTerminalExit: (handler) => {
+    const listener = (_, payload) => handler(payload);
+    ipcRenderer.on("terminal:exit", listener);
+    return () => ipcRenderer.removeListener("terminal:exit", listener);
+  },
 });
