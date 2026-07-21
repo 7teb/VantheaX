@@ -1,6 +1,6 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, MessageSquare, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import MarkdownMessage from "./Markdown.jsx";
 import "./styles.css";
 
@@ -8,6 +8,10 @@ let LANG = "en";
 
 const STRINGS = {
   en: {
+    "mode.code": "Code",
+    "mode.codeDesc": "Read, write and run code in your project",
+    "mode.voice": "Voice",
+    "mode.voiceDesc": "Talk to it and let it drive your PC",
     "nav.newChat": "New chat",
     "nav.search": "Search",
     "nav.openProject": "Open project",
@@ -174,7 +178,7 @@ const STRINGS = {
     "eval.maxTokens": "Max output tokens",
     "eval.budget": "Reasoning budget (Nemotron)",
     "eval.budgetHint": "-1 disables the limit",
-    "eval.maxHint": "Clamped per model: 16k DeepSeek and MiniMax, 32k GLM and Nemotron, 64k Kimi",
+    "eval.maxHint": "Clamped per model: 16k DeepSeek and MiniMax, 32k GLM and Nemotron",
     "eval.topPHint": "Leave at 1 when you tune temperature, NVIDIA advises against changing both",
     "eval.models": "Models added to the picker",
     "perso.personality": "Personality",
@@ -200,6 +204,10 @@ const STRINGS = {
     "perso.memResetSub": "Delete all VantheaX memories",
     "perso.memResetBtn": "Reset",
     "perso.memResetDone": "Done",
+    "perso.narrator": "Thinking narration (experimental)",
+    "perso.narratorSub": "Replace the plain \"Thinking\" with short live lines about what the model is working out",
+    "perso.narratorEnable": "Narrate thinking",
+    "perso.narratorEnableSub": "A second model (Gemini Flash Lite via your OpenRouter key) reads the model's raw reasoning as it streams and writes the lines. Reasoning can contain your project code and prompts, so enabling this sends that data to a second model. Off means nothing extra is sent.",
     "toollabel.webSearch": "Searching the web",
     "toollabel.analyzeImage": "Analyzing image",
     "web.enable": "Enable web search",
@@ -290,6 +298,10 @@ const STRINGS = {
     "time.month": "{n}mo",
   },
   de: {
+    "mode.code": "Code",
+    "mode.codeDesc": "Code im Projekt lesen, schreiben und ausführen",
+    "mode.voice": "Voice",
+    "mode.voiceDesc": "Sprich mit ihr und lass sie deinen PC steuern",
     "nav.newChat": "Neuer Chat",
     "nav.search": "Suche",
     "nav.openProject": "Projekt öffnen",
@@ -456,7 +468,7 @@ const STRINGS = {
     "eval.maxTokens": "Max. Output-Tokens",
     "eval.budget": "Reasoning-Budget (Nemotron)",
     "eval.budgetHint": "-1 hebt das Limit auf",
-    "eval.maxHint": "Pro Modell geklemmt: 16k DeepSeek und MiniMax, 32k GLM und Nemotron, 64k Kimi",
+    "eval.maxHint": "Pro Modell geklemmt: 16k DeepSeek und MiniMax, 32k GLM und Nemotron",
     "eval.topPHint": "Auf 1 lassen, wenn du die Temperatur änderst, NVIDIA rät davon ab beides zu ändern",
     "eval.models": "Modelle im Picker",
     "perso.personality": "Persönlichkeit",
@@ -482,6 +494,10 @@ const STRINGS = {
     "perso.memResetSub": "Alle VantheaX-Erinnerungen löschen",
     "perso.memResetBtn": "Zurücksetzen",
     "perso.memResetDone": "Erledigt",
+    "perso.narrator": "Denk-Kommentar (experimentell)",
+    "perso.narratorSub": "Ersetzt das schlichte \"Denkt nach\" durch kurze Live-Zeilen dazu, was das Modell gerade durchdenkt",
+    "perso.narratorEnable": "Denken kommentieren",
+    "perso.narratorEnableSub": "Ein zweites Modell (Gemini Flash Lite über deinen OpenRouter-Key) liest das rohe Reasoning des Modells live mit und schreibt die Zeilen. Reasoning kann Projekt-Code und Prompts enthalten, mit dem Schalter gehen diese Daten also an ein zweites Modell. Aus heißt: nichts Zusätzliches wird gesendet.",
     "toollabel.webSearch": "Durchsucht das Web",
     "toollabel.analyzeImage": "Bild wird analysiert",
     "web.enable": "Websuche aktivieren",
@@ -871,6 +887,200 @@ const STREAM_MIN_CPS = 25;
 const STREAM_MAX_CPS = 900;
 const STREAM_STALL_CHECK = 2000;
 
+const NARRATE_TYPE_CPS = 45;
+const NARRATE_MIN_HOLD_MS = 2400;
+const NARRATE_FIRST_LINE_MIN_MS = 2500;
+const NARRATE_QUEUE_MAX = 3;
+
+const narrationStore = (() => {
+  const subs = new Set();
+  const s = {
+    owner: null,
+    turnStartedAt: 0,
+    firstLineDone: false,
+    queue: [],
+    current: "",
+    typed: 0,
+    startedAt: 0,
+    holdUntil: 0,
+    appliedTick: 0,
+    suppressedTick: -1,
+    seenAppliedToolIds: new Set(),
+    suppressedByProgress: false,
+    raf: 0,
+    carry: 0,
+    lastFrame: 0,
+  };
+  let line = "";
+
+  const emit = () => {
+    const next = s.current.slice(0, s.typed);
+    if (next === line) {
+      return;
+    }
+    line = next;
+    for (const fn of subs) {
+      fn();
+    }
+  };
+
+  const eligible = () => !s.suppressedByProgress && s.queue.length > 0 && s.queue[0].tick === s.appliedTick;
+
+  const park = () => {
+    if (s.raf) {
+      cancelAnimationFrame(s.raf);
+      s.raf = 0;
+    }
+  };
+
+  // start at one character so a rotation never publishes an empty label for a frame
+  const startLine = (now) => {
+    const next = s.queue.shift();
+    s.current = next.text;
+    s.typed = 1;
+    s.startedAt = now;
+    s.holdUntil = next.text.length <= 1 ? now + NARRATE_MIN_HOLD_MS : 0;
+    s.carry = 0;
+    s.lastFrame = now;
+    s.firstLineDone = true;
+  };
+
+  const step = () => {
+    s.raf = 0;
+    const now = Date.now();
+    if (!s.current) {
+      if (eligible() && (s.firstLineDone || now >= s.turnStartedAt + NARRATE_FIRST_LINE_MIN_MS)) {
+        startLine(now);
+      }
+    } else if (s.typed < s.current.length) {
+      const dt = Math.min(0.25, Math.max(0, (now - s.lastFrame) / 1000));
+      s.lastFrame = now;
+      s.carry += NARRATE_TYPE_CPS * dt;
+      const take = Math.floor(s.carry);
+      if (take > 0) {
+        s.carry -= take;
+        s.typed = Math.min(s.current.length, s.typed + take);
+        if (s.typed >= s.current.length) {
+          s.holdUntil = now + NARRATE_MIN_HOLD_MS;
+        }
+      }
+    } else if (now >= s.holdUntil && eligible()) {
+      startLine(now);
+    } else if (now >= s.holdUntil) {
+      s.current = "";
+      s.typed = 0;
+    }
+    emit();
+    if (s.current || eligible()) {
+      s.raf = requestAnimationFrame(step);
+    }
+  };
+
+  const kick = () => {
+    if (!s.raf && (s.current || eligible())) {
+      s.raf = requestAnimationFrame(step);
+    }
+  };
+
+  const clearAll = () => {
+    park();
+    s.queue = [];
+    s.current = "";
+    s.typed = 0;
+    s.startedAt = 0;
+    s.holdUntil = 0;
+    s.appliedTick = 0;
+    s.suppressedTick = -1;
+    s.seenAppliedToolIds = new Set();
+    s.suppressedByProgress = false;
+    s.firstLineDone = false;
+    s.carry = 0;
+    s.lastFrame = 0;
+  };
+
+  return {
+    begin(requestId) {
+      clearAll();
+      s.owner = requestId;
+      s.turnStartedAt = Date.now();
+      emit();
+    },
+    enqueue(requestId, event) {
+      if (s.owner !== requestId) {
+        return;
+      }
+      const tick = Number(event?.tick) || 0;
+      if (tick < s.appliedTick || tick === s.suppressedTick) {
+        return;
+      }
+      for (const text of event?.lines || []) {
+        const clean = String(text || "").trim();
+        if (clean) {
+          s.queue.push({ text: clean, tick });
+        }
+      }
+      while (s.queue.length > NARRATE_QUEUE_MAX) {
+        s.queue.shift();
+      }
+      kick();
+    },
+    applyTool(requestId, id) {
+      if (s.owner !== requestId) {
+        return;
+      }
+      s.suppressedByProgress = false;
+      if (id && !s.seenAppliedToolIds.has(id)) {
+        s.seenAppliedToolIds.add(id);
+        s.appliedTick += 1;
+        s.queue = s.queue.filter((item) => item.tick >= s.appliedTick);
+        s.current = "";
+        s.typed = 0;
+        emit();
+      }
+      kick();
+    },
+    applyDelta(requestId) {
+      if (s.owner !== requestId) {
+        return;
+      }
+      s.suppressedByProgress = false;
+      s.suppressedTick = s.appliedTick;
+      s.queue = s.queue.filter((item) => item.tick !== s.appliedTick);
+      s.current = "";
+      s.typed = 0;
+      emit();
+      kick();
+    },
+    suppress(requestId) {
+      if (s.owner !== requestId) {
+        return;
+      }
+      s.suppressedByProgress = true;
+      s.current = "";
+      s.typed = 0;
+      emit();
+    },
+    reset(requestId) {
+      if (!requestId || s.owner !== requestId) {
+        return;
+      }
+      clearAll();
+      s.owner = null;
+      s.turnStartedAt = 0;
+      emit();
+    },
+    subscribe(fn) {
+      subs.add(fn);
+      return () => subs.delete(fn);
+    },
+    getLine() {
+      return line;
+    },
+  };
+})();
+
+const useNarrationLine = () => useSyncExternalStore(narrationStore.subscribe, narrationStore.getLine);
+
 const createStreamPacer = (apply) => {
   const queue = [];
   let queuedChars = 0;
@@ -1027,7 +1237,7 @@ const createStreamPacer = (apply) => {
 };
 
 const App = () => {
-  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" } });
+  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, narrator: { enabled: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" } });
   const [models, setModels] = useState([]);
   const [projectPath, setProjectPath] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
@@ -1069,6 +1279,7 @@ const App = () => {
   const [goalDone, setGoalDone] = useState(false);
   const [pendingPermission, setPendingPermission] = useState(null);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(null);
   const [naming, setNaming] = useState(false);
   const [titleAnim, setTitleAnim] = useState(null);
@@ -1173,6 +1384,7 @@ const App = () => {
         setModelOpen(false);
         setPermissionOpen(false);
         setPlusMenuOpen(false);
+        setBrandMenuOpen(false);
         setProjectMenuOpen(false);
         setSettingsOpen(false);
         setChatMenuOpen(false);
@@ -1187,10 +1399,13 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!plusMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !contextOrbOpen && titleMenuOpen === null) {
+    if (!plusMenuOpen && !brandMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !contextOrbOpen && titleMenuOpen === null) {
       return;
     }
     const onDown = (event) => {
+      if (!event.target.closest(".rail-brand")) {
+        setBrandMenuOpen(false);
+      }
       if (!event.target.closest(".titlebar-menu")) {
         setTitleMenuOpen(null);
       }
@@ -1215,7 +1430,7 @@ const App = () => {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [plusMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, contextOrbOpen, titleMenuOpen]);
+  }, [plusMenuOpen, brandMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, contextOrbOpen, titleMenuOpen]);
 
   useEffect(() => {
     if (!chatsLoadedRef.current) {
@@ -1442,6 +1657,7 @@ const App = () => {
   const cancelActiveStream = () => {
     if (activeRequestRef.current) {
       api.cancelStream(activeRequestRef.current);
+      narrationStore.reset(activeRequestRef.current);
       activeRequestRef.current = null;
     }
     activeMsgRef.current = null;
@@ -1904,6 +2120,9 @@ const App = () => {
     }
     const applyStreamEvent = (event) => {
       if (event.type === "delta") {
+        if (event.delta) {
+          narrationStore.applyDelta(requestId);
+        }
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
           if (message.id !== assistantId) {
             return message;
@@ -1919,11 +2138,13 @@ const App = () => {
         }), updatedAt: new Date().toISOString() } : item));
       }
       if (event.type === "tool_progress") {
+        narrationStore.suppress(requestId);
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
           message.id === assistantId ? { ...message, liveTool: { name: event.name, path: event.path, lines: event.lines } } : message
         ) } : item));
       }
       if (event.type === "tool") {
+        narrationStore.applyTool(requestId, event.tool?.id);
         if (event.tool?.name === "update_todos" && Array.isArray(event.tool.result?.todos)) {
           setTodos(event.tool.result.todos);
         }
@@ -1955,6 +2176,7 @@ const App = () => {
     };
     const pacer = createStreamPacer(applyStreamEvent);
     pacerRef.current = pacer;
+    narrationStore.begin(requestId);
     let sawTool = false;
     try {
       const result = await api.sendMessage({
@@ -1982,6 +2204,10 @@ const App = () => {
           }
           return;
         }
+        if (event.type === "narration") {
+          narrationStore.enqueue(requestId, event);
+          return;
+        }
         if (event.type === "tool" && !event.tool?.result?.plan) {
           sawTool = true;
         }
@@ -2005,12 +2231,14 @@ const App = () => {
       }
     } catch (error) {
       pacer.flush();
+      narrationStore.reset(requestId);
       if (activeRequestRef.current === requestId) {
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: error.message, error: true, tools: [], segments: [], done: true } : message), updatedAt: new Date().toISOString() } : item));
         setStatus(t("status.failed"));
       }
     } finally {
       pacer.flush();
+      narrationStore.reset(requestId);
       if (pacerRef.current === pacer) {
         pacerRef.current = null;
       }
@@ -2024,9 +2252,11 @@ const App = () => {
 
   const stopGeneration = () => {
     const active = activeMsgRef.current;
+    const stoppedId = activeRequestRef.current;
     pacerRef.current?.flush();
-    if (activeRequestRef.current) {
-      api.cancelStream(activeRequestRef.current);
+    narrationStore.reset(stoppedId);
+    if (stoppedId) {
+      api.cancelStream(stoppedId);
     }
     if (active) {
       updateChats((current) => current.map((item) => item.id === active.chatId ? { ...item, messages: item.messages.map((message) => message.id === active.assistantId ? { ...message, done: true, cancelled: true, workMs: message.workMs || Math.max(1, Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() } : item));
@@ -2146,6 +2376,7 @@ const App = () => {
 
       <div className="app-shell">
         <aside className="rail">
+          <BrandMenu open={brandMenuOpen && !sidebarCollapsed} onToggle={() => setBrandMenuOpen((value) => !value)} />
           <button className="nav-button" onClick={newChat} title={t("nav.newChat")}>
             <Pencil size={16} />
             <span>{t("nav.newChat")}</span>
@@ -2339,7 +2570,7 @@ const App = () => {
       </div>
 
       {searchOpen && <SearchOverlay chats={searchedChats} query={chatQuery} setQuery={setChatQuery} onClose={() => setSearchOpen(false)} onOpen={openChat} />}
-      {settingsOpen && <SettingsModal hasKey={settings.hasOpenRouterKey} value={keyInput} setValue={setKeyInput} onSave={saveKey} onClose={() => setSettingsOpen(false)} lang={settings.language || "en"} onLang={(value) => persistSettings({ language: value })} webSearch={settings.webSearch || { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }} hasTavilyKey={settings.hasTavilyKey} onWebChange={(patch) => persistSettings({ webSearch: patch })} onSaveTavilyKey={(k) => persistSettings({ tavilyKeyPlain: k })} personality={settings.personality || "pragmatic"} customInstructions={settings.customInstructions || ""} memory={settings.memory || { enabled: false, excludeToolChats: false }} onPersonality={(value) => persistSettings({ personality: value })} onSaveInstructions={(value) => persistSettings({ customInstructions: value })} onMemChange={(patch) => persistSettings({ memory: patch })} onResetMemory={() => api.resetMemories()} models={models} nvidia={settings.nvidia || { enabled: false, temperature: 0.2, topP: 1, maxTokens: 16384, reasoningBudget: 16384 }} hasNvidiaKey={settings.hasNvidiaKey} onNvidiaChange={(patch) => {
+      {settingsOpen && <SettingsModal hasKey={settings.hasOpenRouterKey} value={keyInput} setValue={setKeyInput} onSave={saveKey} onClose={() => setSettingsOpen(false)} lang={settings.language || "en"} onLang={(value) => persistSettings({ language: value })} webSearch={settings.webSearch || { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }} hasTavilyKey={settings.hasTavilyKey} onWebChange={(patch) => persistSettings({ webSearch: patch })} onSaveTavilyKey={(k) => persistSettings({ tavilyKeyPlain: k })} personality={settings.personality || "pragmatic"} customInstructions={settings.customInstructions || ""} memory={settings.memory || { enabled: false, excludeToolChats: false }} narrator={settings.narrator || { enabled: false }} onPersonality={(value) => persistSettings({ personality: value })} onSaveInstructions={(value) => persistSettings({ customInstructions: value })} onMemChange={(patch) => persistSettings({ memory: patch })} onNarratorChange={(patch) => persistSettings({ narrator: patch })} onResetMemory={() => api.resetMemories()} models={models} nvidia={settings.nvidia || { enabled: false, temperature: 0.2, topP: 1, maxTokens: 16384, reasoningBudget: 16384 }} hasNvidiaKey={settings.hasNvidiaKey} onNvidiaChange={(patch) => {
         const leaving = patch.enabled === false && models.find((item) => item.id === settings.model)?.apiProvider === "nvidia";
         const fallback = models.find((item) => item.apiProvider !== "nvidia");
         persistSettings(leaving && fallback ? { nvidia: patch, model: fallback.id, effort: fallback.defaultEffort || "" } : { nvidia: patch });
@@ -2613,6 +2844,39 @@ const ListIcon = ({ size = 24, ...rest }) => (
     <path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" />
     <path d="M8 5h13" /><path d="M8 12h13" /><path d="M8 19h13" />
   </svg>
+);
+
+const AudioLinesIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M2 10v3" /><path d="M6 6v11" /><path d="M10 3v18" />
+    <path d="M14 8v7" /><path d="M18 5v13" /><path d="M22 10v3" />
+  </svg>
+);
+
+const BrandMenu = ({ open, onToggle }) => (
+  <div className="rail-brand">
+    <button className="rail-brand-button" onClick={onToggle}>
+      <span className="rail-brand-name">VantheaX</span>
+      <ChevronUp className={open ? "rail-brand-chevron is-open" : "rail-brand-chevron"} size={18} strokeWidth={2.75} />
+    </button>
+    <div className={open ? "brand-menu open" : "brand-menu"}>
+      <button className="brand-menu-row is-active" onClick={onToggle}>
+        <span className="brand-menu-icon"><Terminal size={17} /></span>
+        <span className="brand-menu-text">
+          <span className="brand-menu-title">{t("mode.code")}</span>
+          <span className="brand-menu-desc">{t("mode.codeDesc")}</span>
+        </span>
+        <Check className="brand-menu-check" size={15} />
+      </button>
+      <button className="brand-menu-row is-voice" disabled>
+        <span className="brand-menu-icon"><AudioLinesIcon size={17} /></span>
+        <span className="brand-menu-text">
+          <span className="brand-menu-title">{t("mode.voice")}</span>
+          <span className="brand-menu-desc">{t("mode.voiceDesc")}</span>
+        </span>
+      </button>
+    </div>
+  </div>
 );
 
 const GripIcon = ({ size = 24, ...rest }) => (
@@ -2924,11 +3188,15 @@ const PlanBlockedNote = ({ tool, hasPlan }) => (
   </div>
 );
 
-const Thinking = () => (
-  <div className="thinking">
-    <span className="live-label" data-shimmer-label={t("work.thinking")}>{t("work.thinking")}</span>
-  </div>
-);
+const Thinking = () => {
+  const line = useNarrationLine();
+  const label = line || t("work.thinking");
+  return (
+    <div className="thinking">
+      <span className="live-label" data-shimmer-label={label}>{label}</span>
+    </div>
+  );
+};
 
 const Typewriter = ({ text, animate }) => {
   const [shown, setShown] = useState(animate ? 0 : text.length);
@@ -3378,6 +3646,16 @@ const WebSearchStep = ({ tool }) => {
   );
 };
 
+const NarrationRow = () => {
+  const line = useNarrationLine();
+  const label = line || t("work.thinking");
+  return (
+    <div className="running-head narration-row">
+      <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
+    </div>
+  );
+};
+
 const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) => {
   const detailsRef = useRef(null);
   const wasWorking = useRef(false);
@@ -3429,6 +3707,7 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
           return <ToolStep tool={block.tool} key={key} />;
         })}
         {liveTool && <LiveToolStep tool={liveTool} />}
+        {!liveTool && working && <NarrationRow />}
       </div>
     </details>
   );
@@ -4069,8 +4348,9 @@ const PersonalityDropdown = ({ value, onChange }) => {
   );
 };
 
-const PersonalizationSettings = ({ personality, customInstructions, memory, onPersonality, onSaveInstructions, onMemChange, onResetMemory }) => {
+const PersonalizationSettings = ({ personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory }) => {
   const mem = memory || { enabled: false, excludeToolChats: false };
+  const nar = narrator || { enabled: false };
   const [ci, setCi] = useState(customInstructions || "");
   const [savedCi, setSavedCi] = useState(false);
   const [didReset, setDidReset] = useState(false);
@@ -4128,6 +4408,19 @@ const PersonalizationSettings = ({ personality, customInstructions, memory, onPe
               <div className="perso-mem-desc">{t("perso.memResetSub")}</div>
             </div>
             <button className="perso-reset" onClick={doReset}>{didReset ? t("perso.memResetDone") : t("perso.memResetBtn")}</button>
+          </div>
+        </div>
+      </div>
+      <div className="perso-section">
+        <div className="perso-section-title">{t("perso.narrator")}</div>
+        <div className="perso-section-sub">{t("perso.narratorSub")}</div>
+        <div className="perso-mem-card">
+          <div className="perso-mem-row">
+            <div className="perso-mem-text">
+              <div className="perso-mem-title">{t("perso.narratorEnable")}</div>
+              <div className="perso-mem-desc">{t("perso.narratorEnableSub")}</div>
+            </div>
+            <span className={nar.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onNarratorChange({ enabled: !nar.enabled })} />
           </div>
         </div>
       </div>
@@ -4250,7 +4543,7 @@ const ModelEvalSettings = ({ config, hasKey, models, onChange, onSaveKey }) => {
   );
 };
 
-const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, onPersonality, onSaveInstructions, onMemChange, onResetMemory, models, nvidia, hasNvidiaKey, onNvidiaChange, onSaveNvidiaKey }) => {
+const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory, models, nvidia, hasNvidiaKey, onNvidiaChange, onSaveNvidiaKey }) => {
   const [tab, setTab] = useState("general");
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -4288,7 +4581,7 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
           ) : tab === "modeleval" ? (
             <ModelEvalSettings config={nvidia} hasKey={hasNvidiaKey} models={models} onChange={onNvidiaChange} onSaveKey={onSaveNvidiaKey} />
           ) : (
-            <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onResetMemory={onResetMemory} />
+            <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} narrator={narrator} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onNarratorChange={onNarratorChange} onResetMemory={onResetMemory} />
           )}
         </div>
       </div>

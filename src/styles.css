@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300..900&family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 :root {
   color-scheme: dark;
@@ -311,12 +311,161 @@ textarea {
   transition: opacity .18s ease, padding .24s var(--ease);
 }
 
+.rail-brand {
+  flex: 0 0 auto;
+  height: 40px;
+  margin-bottom: 6px;
+}
+
+.rail-brand-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+
+.rail-brand-button:hover {
+  background: rgba(255, 255, 255, .05);
+}
+
+.rail-brand-name {
+  font-size: 23px;
+  font-weight: 900;
+  letter-spacing: -.025em;
+  line-height: 1;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.rail-brand-chevron {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #817a73;
+  transition: transform .22s var(--ease), color .18s ease;
+}
+
+.rail-brand-button:hover .rail-brand-chevron {
+  color: var(--text);
+}
+
+.rail-brand-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.brand-menu {
+  position: fixed;
+  top: 94px;
+  left: 12px;
+  z-index: 31;
+  width: 262px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  background: #1f1e1c;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .45);
+  opacity: 0;
+  transform: translateY(-8px) scale(.97);
+  transform-origin: top left;
+  pointer-events: none;
+  transition: opacity .26s cubic-bezier(.22, .72, .22, 1), transform .26s cubic-bezier(.22, .72, .22, 1);
+}
+
+.brand-menu.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.brand-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+
+.brand-menu-row:hover {
+  background: rgba(255, 255, 255, .05);
+}
+
+.brand-menu-row.is-active {
+  background: rgba(255, 255, 255, .07);
+}
+
+.brand-menu-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  color: var(--muted);
+}
+
+.brand-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brand-menu-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+.brand-menu-desc {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--faint);
+}
+
+.brand-menu-check {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.brand-menu-row:disabled:hover {
+  background: transparent;
+}
+
+.brand-menu-row.is-voice {
+  cursor: default;
+}
+
+.brand-menu-row.is-voice .brand-menu-icon {
+  color: #ffc9e0;
+}
+
+.brand-menu-row.is-voice .brand-menu-title {
+  color: #fff;
+  text-shadow: 0 0 1px rgba(255, 150, 200, .85), 0 0 10px rgba(255, 120, 185, .45);
+}
+
+.brand-menu-row.is-voice .brand-menu-desc {
+  color: #9b8a92;
+}
+
 .project-item span,
 .project-item small,
 .chat-row span,
 .primary-command span,
 .nav-button span,
 .rail-settings span,
+.rail-brand-name,
 .section-label {
   transition: opacity .22s var(--ease), transform .22s var(--ease);
 }
@@ -334,6 +483,7 @@ textarea {
 .sidebar-collapsed .primary-command span,
 .sidebar-collapsed .nav-button span,
 .sidebar-collapsed .rail-settings span,
+.sidebar-collapsed .rail-brand-name,
 .sidebar-collapsed .section-label {
   width: 0;
   opacity: 0;
@@ -2441,6 +2591,10 @@ textarea {
   color: #d7d0c8;
   font-size: 13.5px;
   font-weight: 560;
+}
+
+.narration-row {
+  padding-left: 26px;
 }
 
 .tool-step.running > summary {

@@ -109,23 +109,6 @@
     "defaultTopP": 1
   },
   {
-    "id": "nvidia:moonshotai/kimi-k2.6",
-    "apiId": "moonshotai/kimi-k2.6",
-    "apiProvider": "nvidia",
-    "label": "Kimi K2.6",
-    "provider": "Nvidia",
-    "providerKey": "nvidia",
-    "efforts": ["off", "on"],
-    "defaultEffort": "on",
-    "effortMap": {
-      "off": { "chat_template_kwargs": { "thinking": false } },
-      "on": { "chat_template_kwargs": { "thinking": true } }
-    },
-    "supportsVision": true,
-    "maxOutput": 65536,
-    "defaultTopP": 1
-  },
-  {
     "id": "nvidia:minimaxai/minimax-m3",
     "apiId": "minimaxai/minimax-m3",
     "apiProvider": "nvidia",

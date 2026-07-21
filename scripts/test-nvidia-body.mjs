@@ -54,10 +54,6 @@ const EXPECTED = [
     high: { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "high" } },
     max: { chat_template_kwargs: { enable_thinking: true, reasoning_effort: "max" } },
   }],
-  ["nvidia:moonshotai/kimi-k2.6", "moonshotai/kimi-k2.6", 65536, 1, {
-    off: { chat_template_kwargs: { thinking: false } },
-    on: { chat_template_kwargs: { thinking: true } },
-  }],
   ["nvidia:minimaxai/minimax-m3", "minimaxai/minimax-m3", 16384, 0.95, {
     disabled: { chat_template_kwargs: { thinking_mode: "disabled" } },
     adaptive: { chat_template_kwargs: { thinking_mode: "adaptive" } },
@@ -111,7 +107,6 @@ const schemaField = {
   "nvidia:deepseek-ai/deepseek-v4-pro": "reasoning_effort",
   "nvidia:nvidia/nemotron-3-ultra-550b-a55b": "reasoning_effort",
   "nvidia:z-ai/glm-5.2": "chat_template_kwargs",
-  "nvidia:moonshotai/kimi-k2.6": "chat_template_kwargs",
   "nvidia:minimaxai/minimax-m3": "chat_template_kwargs",
 };
 for (const [id, field] of Object.entries(schemaField)) {
@@ -125,8 +120,8 @@ for (const [id, field] of Object.entries(schemaField)) {
 const emptySettings = build("nvidia:z-ai/glm-5.2", "max", {});
 check("missing nvidia settings fall back to defaults", emptySettings.temperature === 0.2 && emptySettings.top_p === 1 && emptySettings.max_tokens === 32768, JSON.stringify(emptySettings));
 
-const bogus = build("nvidia:moonshotai/kimi-k2.6", "xhigh");
-check("unknown effort falls back to defaultEffort", eq(bogus.chat_template_kwargs, { thinking: true }), JSON.stringify(bogus.chat_template_kwargs));
+const bogus = build("nvidia:minimaxai/minimax-m3", "xhigh");
+check("unknown effort falls back to defaultEffort", eq(bogus.chat_template_kwargs, { thinking_mode: "enabled" }), JSON.stringify(bogus.chat_template_kwargs));
 
 const noTools = build("nvidia:z-ai/glm-5.2", "high", SETTINGS, []);
 check("no tools key when the tool list is empty", noTools.tools === undefined && noTools.tool_choice === undefined);
@@ -142,7 +137,7 @@ const glmOr = buildRequestBody(entry("z-ai/glm-5.2"), SETTINGS, { model: "z-ai/g
 check("openrouter glm pins Z.AI", eq(glmOr.provider, { order: ["Z.AI"], allow_fallbacks: false }));
 
 const nvidiaIds = catalog.filter((m) => m.apiProvider === "nvidia");
-check("six nvidia models in the catalog", nvidiaIds.length === 6, String(nvidiaIds.length));
+check("five nvidia models in the catalog", nvidiaIds.length === 5, String(nvidiaIds.length));
 check("nvidia catalog ids are namespaced", nvidiaIds.every((m) => m.id.startsWith("nvidia:")));
 check("nvidia ids do not collide with openrouter ids", new Set(catalog.map((m) => m.id)).size === catalog.length);
 check("every nvidia model maps every effort", nvidiaIds.every((m) => m.efforts.every((e) => m.effortMap && m.effortMap[e])));

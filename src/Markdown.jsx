@@ -125,14 +125,25 @@ const components = {
   img: ({ src, alt }) => <img className="md-img" src={src} alt={alt || ""} loading="lazy" />,
 };
 
-const MarkdownMessage = React.memo(({ content }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm, remarkMath]}
-    rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false, trust: false }]]}
-    components={components}
-  >
-    {content || ""}
-  </ReactMarkdown>
-));
+// models emit \( \) and \[ \], which remark-math ignores and markdown strips to bare parens
+const normalizeMath = (raw) => String(raw || "")
+  .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g)
+  .map((part, idx) => (idx % 2 === 1 ? part : part
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, inner) => `$$${inner}$$`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_, inner) => `$${inner}$`)))
+  .join("");
+
+const MarkdownMessage = React.memo(({ content }) => {
+  const text = useMemo(() => normalizeMath(content), [content]);
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false, trust: false }]]}
+      components={components}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+});
 
 export default MarkdownMessage;
