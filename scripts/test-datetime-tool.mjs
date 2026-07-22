@@ -36,12 +36,12 @@ const fakeSpecs = [
 const mcp = [{ type: "function", function: { name: "mcp__srv__thing" } }];
 
 const api = new Function("toolSpecs", "mcpManager",
-  `${body}\nreturn { toolsForContext, localIsoStamp, localTimeZone, datetimeServerTool, datetimeFunctionTool, readOnlyToolNames, setOff: (v) => { serverDatetimeOff = v; } };`,
+  `${body}\nreturn { toolsForContext, localIsoStamp, localTimeZone, datetimeFunctionTool, readOnlyToolNames };`,
 )(fakeSpecs, { getToolSpecs: () => mcp });
 
 const names = (list) => list.map((tool) => (tool.type === "function" ? tool.function.name : tool.type));
 
-// localIsoStamp matches the shape OpenRouter's datetime tool returns
+// localIsoStamp matches the {datetime, timezone} shape the tool returns
 {
   const stamp = api.localIsoStamp(new Date(Date.UTC(2026, 6, 21, 20, 49, 5, 7)));
   check("iso shape", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/.test(stamp), true);
@@ -53,57 +53,40 @@ const names = (list) => list.map((tool) => (tool.type === "function" ? tool.func
   check("iso of now round-trips", new Date(api.localIsoStamp(now)).getTime(), now.getTime());
 }
 
-// the tool objects themselves
+// the tool is a plain function tool, never the openrouter:datetime server tool (which poisons the request)
 {
-  check("server tool type", api.datetimeServerTool.type, "openrouter:datetime");
-  check("server tool carries the machine timezone", api.datetimeServerTool.parameters.timezone, api.localTimeZone);
-  check("server tool has no function key", "function" in api.datetimeServerTool, false);
-  check("local tool name", api.datetimeFunctionTool.function.name, "datetime");
-  check("local tool takes no arguments", api.datetimeFunctionTool.function.parameters.properties, {});
+  check("datetime is a function tool", api.datetimeFunctionTool.type, "function");
+  check("datetime tool name", api.datetimeFunctionTool.function.name, "datetime");
+  check("datetime takes no arguments", api.datetimeFunctionTool.function.parameters.properties, {});
   check("datetime survives plan-mode filtering", api.readOnlyToolNames.has("datetime"), true);
 }
 
-// OpenRouter route gets the server tool, NVIDIA gets the local function
+// BOTH routes get the same plain function tool, and the openrouter server-tool type never appears
 {
-  api.setOff(false);
-  const or = api.toolsForContext({ webSearchEnabled: true }, undefined);
-  check("openrouter gets the server tool", names(or).includes("openrouter:datetime"), true);
-  check("openrouter does not also get the local one", names(or).filter((n) => n === "datetime").length, 0);
-
-  const nv = api.toolsForContext({ webSearchEnabled: true }, "nvidia");
-  check("nvidia gets the local function", names(nv).includes("datetime"), true);
-  check("nvidia never sees the server tool", names(nv).includes("openrouter:datetime"), false);
-}
-
-// exactly one datetime tool, always, and it sits before the MCP specs
-{
-  api.setOff(false);
-  const list = api.toolsForContext({ webSearchEnabled: true }, undefined);
-  const dt = names(list).filter((n) => n === "openrouter:datetime" || n === "datetime");
-  check("exactly one datetime tool", dt.length, 1);
+  const list = api.toolsForContext({ webSearchEnabled: true });
+  check("datetime function tool is present", names(list).includes("datetime"), true);
+  check("no openrouter:datetime server tool anywhere", names(list).includes("openrouter:datetime"), false);
+  check("exactly one datetime tool", names(list).filter((n) => n === "datetime").length, 1);
   const mcpAt = names(list).indexOf("mcp__srv__thing");
-  const dtAt = names(list).indexOf("openrouter:datetime");
+  const dtAt = names(list).indexOf("datetime");
   check("datetime sits before the mcp specs", dtAt < mcpAt, true);
-  check("nativeSpecs slice still captures it", names(list.slice(0, list.length - mcp.length)).includes("openrouter:datetime"), true);
+  check("nativeSpecs slice still captures it", names(list.slice(0, list.length - mcp.length)).includes("datetime"), true);
 }
 
-// the 4xx fallback swaps the server tool for the local one
+// plan mode keeps datetime (read-only) and still drops the write tools and mcp
 {
-  api.setOff(true);
-  const list = api.toolsForContext({ webSearchEnabled: true }, undefined);
-  check("fallback drops the server tool", names(list).includes("openrouter:datetime"), false);
-  check("fallback uses the local function", names(list).includes("datetime"), true);
-  api.setOff(false);
-}
-
-// plan mode keeps datetime and still drops the write tools
-{
-  const list = api.toolsForContext({ planMode: true, webSearchEnabled: true }, undefined);
-  check("plan mode keeps datetime", names(list).includes("openrouter:datetime"), true);
+  const list = api.toolsForContext({ planMode: true, webSearchEnabled: true });
+  check("plan mode keeps datetime", names(list).includes("datetime"), true);
   check("plan mode keeps read_file", names(list).includes("read_file"), true);
   check("plan mode drops write_file", names(list).includes("write_file"), false);
   check("plan mode drops run_command", names(list).includes("run_command"), false);
   check("plan mode drops mcp", names(list).includes("mcp__srv__thing"), false);
+}
+
+// web search off drops the web_search tool, on keeps it
+{
+  check("web off drops web_search", names(api.toolsForContext({ webSearchEnabled: false })).includes("web_search"), false);
+  check("web on keeps web_search", names(api.toolsForContext({ webSearchEnabled: true })).includes("web_search"), true);
 }
 
 // nothing without a .function key ever reaches the spec filter
@@ -115,7 +98,7 @@ const names = (list) => list.map((tool) => (tool.type === "function" ? tool.func
     new Proxy(fakeSpecs, { get: (t, k) => (k === "filter" ? (fn) => t.filter((x, i) => { seen.push(x.type); return fn(x, i); }) : t[k]) }),
     { getToolSpecs: () => mcp },
   );
-  probe({ webSearchEnabled: true }, undefined);
+  probe({ webSearchEnabled: true });
   check("filter only ever saw function specs", seen.every((type) => type === "function"), true);
 }
 

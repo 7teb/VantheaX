@@ -1124,8 +1124,7 @@ const localIsoStamp = (now) => {
 
 const datetimeDescription = "Get the real current date and time on the user's machine. You do NOT know what day it is on your own, your training data is stale by at least a year. Call this before answering anything that depends on the present moment: today's date, how old or recent something is, whether a version or release is still current, scheduling, or any use of now, today, latest, recent, or nowadays. Takes no arguments.";
 
-const datetimeServerTool = { type: "openrouter:datetime", parameters: { timezone: localTimeZone } };
-
+// plain function tool on BOTH routes: openrouter:datetime (the server-tool form) was measured to poison DeepSeek on OpenRouter, delaying reasoning ~55s, collapsing narration, and forcing spurious tool calls
 const datetimeFunctionTool = {
   type: "function",
   function: {
@@ -1135,10 +1134,7 @@ const datetimeFunctionTool = {
   },
 };
 
-// openrouter:datetime is beta and only exists on the OpenRouter route, so a 4xx flips this and the local function takes over
-let serverDatetimeOff = false;
-
-const toolsForContext = (payload, provider) => {
+const toolsForContext = (payload) => {
   const base = toolSpecs.filter((tool) => {
     const name = tool.function.name;
     if (name === "web_search") {
@@ -1155,7 +1151,7 @@ const toolsForContext = (payload, provider) => {
     }
     return true;
   });
-  base.push(provider === "nvidia" || serverDatetimeOff ? datetimeFunctionTool : datetimeServerTool);
+  base.push(datetimeFunctionTool);
   if (payload.planMode) {
     return base;
   }
@@ -1352,10 +1348,11 @@ const narratorMaxLineChars = 90;
 const narratorSystemPrompt = [
   "You write the live status line of a coding agent's UI. While the agent is thinking, the user sees one short line at a time in place of the word \"Thinking\". You get a slice of the agent's raw private reasoning, the user's message, and the lines already shown. Reply with ONLY a JSON array of 1 to 5 strings. No prose, no code fence, no keys, just the array.",
   "Write in the agent's OWN voice, first person singular, the way a focused engineer narrates their own work to themselves while doing it. Never \"we\", never \"the model\", never \"the AI\", never \"the agent\". Do not open every line the same way, and never fall into a template.",
-  "There are exactly two kinds of line and you must pick the right one for the slice:",
-  "ACTION, for when the reasoning shows the agent in the MIDDLE of producing or working through something that takes a while: writing code, drafting a function, laying out a file, sketching a diagram, tracing execution, grinding through arithmetic. Write a gerund phrase naming the concrete thing and END IT WITH THREE DOTS. Examples: \"Writing the expression parser...\", \"Writing the main loop...\", \"Tracing through the division cases...\", \"Working out the overflow edge case...\", \"Writing the diagram code...\".",
-  "THOUGHT, for orienting or deciding. One short sentence ending in a period, question mark or exclamation mark. Examples: \"The user wants SEH here, not C++ exceptions.\", \"I'll isolate the unsafe part in its own function.\", \"This needs current info, so a search.\".",
-  "WHENEVER the slice contains code the agent is writing out, drafting or revising, you MUST emit an ACTION line naming what is being written. This is the most important case in the whole job: the user is staring at a spinner while a long file is being composed, and that line is the only thing telling them what is happening. Never go silent through it, and never describe it as thinking.",
+  "There are two kinds of line. THOUGHT is the default and should be most of what you write; ACTION is the exception, only for work visibly in progress.",
+  "THOUGHT, for orienting, deciding, realising, and ANNOUNCING WHAT COMES NEXT. One short sentence. Vary how it opens, never use the same opener twice in a row. Orienting and deciding end in a period: \"The user wants SEH here, not C++ exceptions.\", \"I'll isolate the unsafe part in its own function.\". But when you ANNOUNCE the next thing you are about to do, END IT WITH AN EXCLAMATION MARK, never a period, for a bit of drive: \"Time to line up the three clock offsets!\", \"Now to pin down B's real time!\", \"Next up, narrowing the ranges!\", \"Let me check whether the timestamps are even consistent!\".",
+  "ACTION, ONLY when the slice literally shows the agent in the MIDDLE of producing content that takes a while: writing out code, drafting a function body, laying out a file, sketching a diagram, grinding through a long calculation. A gerund phrase naming the concrete thing, ending in THREE DOTS. Examples: \"Writing the expression parser...\", \"Tracing through the division cases...\". Do NOT use this shape for deciding, planning or announcing, only for something being produced right now.",
+  "VARY the shapes across the lines you return. A run of only ACTION (...) lines is wrong; do not end most lines with three dots. Announce what you are about to do at least as often as you narrate what you are doing.",
+  "When the slice literally shows code being written out or revised, that ONE line must be an ACTION line naming what is being written, so the user knows a long file is being composed and not that you went idle. Everywhere else, prefer THOUGHT.",
   "Rules for every line:",
   "- At most 12 words. Present tense.",
   "- Same language as the USER MESSAGE, even when the reasoning is in another language.",
@@ -1529,7 +1526,8 @@ const createNarrator = (settings, payload, emitBase, signal) => {
             const displayMs = lines.reduce((sum, text) => sum + (text.length / narratorTypeCps) * 1000 + narratorLineHoldMs, 0);
             displayFreeAt = Math.max(displayFreeAt, Date.now()) + displayMs;
             shownLines = [...shownLines, ...lines].slice(-12);
-            emitBase({ type: "narration", lines, stretch: stretchSeq, tick: toolTick });
+            // flag the batch that reaches the budget so the renderer drops to "Thinking" during the silence gap instead of holding a trailing "..." line
+            emitBase({ type: "narration", lines, stretch: stretchSeq, tick: toolTick, pauseAfter: linesThisStretch >= batchBudget });
           }
         }
       }
@@ -2563,7 +2561,8 @@ const sleep = (ms, signal) => new Promise((resolve) => {
 
 const backoffDelay = (attempt) => Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
 
-const retryableHttpStatus = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+// 520-524 and 529 are Cloudflare origin errors (the upstream provider blipped), transient and safe to retry since the status arrives before any streaming
+const retryableHttpStatus = new Set([408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529]);
 
 const isRetryableFetchError = (error) => {
   if (!error || error.name === "AbortError") {
@@ -3013,8 +3012,7 @@ const runAgentStream = async (payload, sender) => {
       let planPresented = false;
       for (let round = 0; round < maxToolRounds; round += 1) {
         const target = modelEntry?.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
-        const makeBody = () => buildRequestBody(modelEntry, settings, payload, messages, toolsForContext(payload, modelEntry?.apiProvider));
-        const body = makeBody();
+        const body = buildRequestBody(modelEntry, settings, payload, messages, toolsForContext(payload));
         const mcpSpecs = payload.planMode ? [] : mcpManager.getToolSpecs();
         const nativeSpecs = (body.tools || []).slice(0, Math.max(0, (body.tools || []).length - mcpSpecs.length));
         emit({ type: "context", usage: measureContext(systemTokens, codeTokens, nativeSpecs, mcpSpecs, JSON.stringify(messages.slice(1))) });
@@ -3023,15 +3021,7 @@ const runAgentStream = async (payload, sender) => {
         }
         let message;
         try {
-          try {
-            message = await streamOpenRouter(settings, body, emit, controller.signal, target);
-          } catch (error) {
-            if (serverDatetimeOff || target || controller.signal.aborted || !/^OpenRouter 4\d\d/.test(String(error?.message || ""))) {
-              throw error;
-            }
-            serverDatetimeOff = true;
-            message = await streamOpenRouter(settings, makeBody(), emit, controller.signal, target);
-          }
+          message = await streamOpenRouter(settings, body, emit, controller.signal, target);
         } catch (error) {
           if (controller.signal.aborted) {
             break;
@@ -3042,6 +3032,11 @@ const runAgentStream = async (payload, sender) => {
           }
           if (isRetryableFetchError(error)) {
             throw new Error(`Lost the connection to ${modelEntry?.apiProvider === "nvidia" ? "NVIDIA" : "OpenRouter"} (network error) and automatic retries failed. Check your internet, VPN, or firewall and try again. (${m.slice(0, 180)})`);
+          }
+          const providerErr = m.match(/^(?:OpenRouter|NVIDIA) (\d{3}):/);
+          if (providerErr && (Number(providerErr[1]) >= 500 || providerErr[1] === "429")) {
+            const providerName = (m.match(/"provider_name"\s*:\s*"([^"]+)"/) || [])[1] || (modelEntry?.apiProvider === "nvidia" ? "NVIDIA" : "OpenRouter");
+            throw new Error(`${providerName} returned a temporary error (${providerErr[1]}) and automatic retries did not clear it. This is a provider-side hiccup, not your project or the code. Try again in a moment, or switch model.`);
           }
           throw error;
         }

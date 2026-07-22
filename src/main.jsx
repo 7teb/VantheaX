@@ -949,6 +949,7 @@ const narrationStore = (() => {
     seenAppliedToolIds: new Set(),
     suppressedByProgress: false,
     fading: false,
+    currentPauseAfter: false,
     raf: 0,
     carry: 0,
     lastFrame: 0,
@@ -979,11 +980,13 @@ const narrationStore = (() => {
   const startLine = (now) => {
     const next = s.queue.shift();
     s.current = next.text;
+    // the last line of a batch that ends a stretch-batch drops back to "Thinking" at the normal hold instead of the 20s action hold, so the deliberate pause is visible
+    s.currentPauseAfter = Boolean(next.pauseAfter);
     s.typed = 1;
     s.startedAt = now;
     s.fading = false;
     s.holdUntil = next.text.length <= 1 ? now + NARRATE_MIN_HOLD_MS : 0;
-    s.clearUntil = next.text.length <= 1 ? now + narrateHoldFor(next.text) : 0;
+    s.clearUntil = next.text.length <= 1 ? now + (s.currentPauseAfter ? NARRATE_MIN_HOLD_MS : narrateHoldFor(next.text)) : 0;
     s.carry = 0;
     s.lastFrame = now;
     s.firstLineDone = true;
@@ -1006,7 +1009,7 @@ const narrationStore = (() => {
         s.typed = Math.min(s.current.length, s.typed + take);
         if (s.typed >= s.current.length) {
           s.holdUntil = now + NARRATE_MIN_HOLD_MS;
-          s.clearUntil = now + (s.fading ? NARRATE_FADE_MS : narrateHoldFor(s.current));
+          s.clearUntil = now + (s.fading ? NARRATE_FADE_MS : (s.currentPauseAfter ? NARRATE_MIN_HOLD_MS : narrateHoldFor(s.current)));
         }
       }
     } else if (now >= s.holdUntil && eligible()) {
@@ -1041,6 +1044,7 @@ const narrationStore = (() => {
     s.seenAppliedToolIds = new Set();
     s.suppressedByProgress = false;
     s.fading = false;
+    s.currentPauseAfter = false;
     s.firstLineDone = false;
     s.carry = 0;
     s.lastFrame = 0;
@@ -1061,12 +1065,10 @@ const narrationStore = (() => {
       if (tick < s.appliedTick || tick === s.suppressedTick) {
         return;
       }
-      for (const text of event?.lines || []) {
-        const clean = String(text || "").trim();
-        if (clean) {
-          s.queue.push({ text: clean, tick });
-        }
-      }
+      const clean = (event?.lines || []).map((text) => String(text || "").trim()).filter(Boolean);
+      clean.forEach((text, i) => {
+        s.queue.push({ text, tick, pauseAfter: Boolean(event?.pauseAfter) && i === clean.length - 1 });
+      });
       while (s.queue.length > NARRATE_QUEUE_MAX) {
         s.queue.shift();
       }
@@ -1302,10 +1304,12 @@ const App = () => {
   const [rightPanel, setRightPanel] = useState("");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalFull, setTerminalFull] = useState(false);
+  const [termClosing, setTermClosing] = useState(false);
   const [termTabs, setTermTabs] = useState([]);
   const [termActive, setTermActive] = useState(0);
   const [termWidth, setTermWidth] = useState(() => Math.round((typeof window !== "undefined" ? window.innerWidth : 1280) * 0.42));
   const termSeq = useRef(0);
+  const termCloseTimer = useRef(null);
   const [contextUsage, setContextUsage] = useState(null);
   const [pendingCompact, setPendingCompact] = useState(null);
   const [compressing, setCompressing] = useState(false);
@@ -2018,12 +2022,31 @@ const App = () => {
     return id;
   };
 
+  const closeTerminal = () => {
+    if (termCloseTimer.current) {
+      clearTimeout(termCloseTimer.current);
+    }
+    setTerminalOpen(false);
+    setTerminalFull(false);
+    // keep the panel mounted while the grid track collapses so it slides out instead of popping
+    setTermClosing(true);
+    termCloseTimer.current = setTimeout(() => {
+      setTermClosing(false);
+      setTermTabs([]);
+      termCloseTimer.current = null;
+    }, 260);
+  };
+
   const toggleTerminal = () => {
     if (terminalOpen) {
-      setTerminalOpen(false);
-      setTerminalFull(false);
+      closeTerminal();
       return;
     }
+    if (termCloseTimer.current) {
+      clearTimeout(termCloseTimer.current);
+      termCloseTimer.current = null;
+    }
+    setTermClosing(false);
     setInspectorOpen(false);
     if (!termTabs.length) {
       addTermTab();
@@ -2032,22 +2055,15 @@ const App = () => {
   };
 
   const closeTermTab = (id) => {
+    if (termTabs.length <= 1) {
+      closeTerminal();
+      return;
+    }
     setTermTabs((tabs) => {
       const next = tabs.filter((tab) => tab.id !== id);
-      if (!next.length) {
-        setTerminalOpen(false);
-        setTerminalFull(false);
-      } else {
-        setTermActive((current) => (current === id ? next[next.length - 1].id : current));
-      }
+      setTermActive((current) => (current === id ? next[next.length - 1].id : current));
       return next;
     });
-  };
-
-  const closeTerminal = () => {
-    setTerminalOpen(false);
-    setTerminalFull(false);
-    setTermTabs([]);
   };
 
   const clampTermWidth = (width, rect) => {
@@ -2379,7 +2395,8 @@ const App = () => {
       pacer.flush();
       narrationStore.reset(requestId);
       if (activeRequestRef.current === requestId) {
-        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: error.message, error: true, tools: [], segments: [], done: true } : message), updatedAt: new Date().toISOString() } : item));
+        const clean = String(error?.message || "").replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, "") || "The turn failed.";
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: clean, error: true, tools: [], segments: [], done: true } : message), updatedAt: new Date().toISOString() } : item));
         setStatus(t("status.failed"));
       }
     } finally {
@@ -2721,7 +2738,7 @@ const App = () => {
         {terminalOpen && !terminalFull && (
           <div className="terminal-resizer" onMouseDown={startTermResize} title={t("terminal.resize")} />
         )}
-        {terminalOpen && (
+        {(terminalOpen || termClosing) && (
           <TerminalPanel
             tabs={termTabs}
             activeId={termActive}
@@ -4081,7 +4098,6 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
           return <ToolStep tool={block.tool} key={key} />;
         })}
         {liveTool && <LiveToolStep tool={liveTool} />}
-        {!liveTool && working && <NarrationRow />}
       </div>
     </details>
   );
@@ -4240,6 +4256,7 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
             : (working
                 ? (!planSeg && <Thinking />)
                 : (Boolean((message.content || "").trim()) && <div className="message-text markdown"><Typewriter key={message.id} text={message.content} animate={sawWorkingRef.current} /></div>))}
+          {hasWork && working && !message.liveTool && <NarrationRow />}
           {!working && <FileChangesCard message={message} projectPath={projectPath} onUndo={onUndoTurn} onReveal={onReveal} />}
         </div>
       </div>

@@ -286,11 +286,11 @@ textarea {
 }
 
 .inspector-closed .app-shell {
-  grid-template-columns: 300px minmax(360px, 1fr);
+  grid-template-columns: 300px minmax(360px, 1fr) 0px;
 }
 
 .sidebar-collapsed.inspector-closed .app-shell {
-  grid-template-columns: 0 minmax(360px, 1fr);
+  grid-template-columns: 0 minmax(360px, 1fr) 0px;
 }
 
 .terminal-open .app-shell {
@@ -2900,6 +2900,7 @@ textarea {
 
 .narration-row {
   padding-left: 2px;
+  margin-top: 8px;
   min-height: 28px;
   font-size: 14.5px;
   font-weight: 520;
