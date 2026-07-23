@@ -39,6 +39,8 @@ const maxCommandTimeout = 3600000;
 const agentContextThreshold = Math.floor(512000 * 0.8);
 const agentContextEmergency = Math.floor(512000 * 0.92);
 const agentRuntimeLimit = 2 * 60 * 60 * 1000;
+const agentFirstTokenTimeout = 75000;
+const agentStreamIdleTimeout = 90000;
 let mainWindow = null;
 let backgroundTaskManager = null;
 let agentSessionManager = null;
@@ -1023,7 +1025,7 @@ const toolSpecs = [
     type: "function",
     function: {
       name: "deploy_agent",
-      description: "Deploy one focused sub-agent and wait for its report. Use this ONLY when delegation has a real benefit: the user explicitly asks for agents, the task contains multiple independent investigations that should run in parallel, a large read-heavy exploration would pollute your own context, or a substantial bounded implementation can be owned independently. NEVER deploy an agent for a simple lookup, a small edit, a task you can finish in a few normal tool calls, or merely to avoid doing the work yourself. The agent has a separate persistent context, uses the selected chat permission mode, cannot speak to the user, cannot deploy agents, and returns one technical report. Multiple deploy_agent calls in the same response run in parallel. The call stays active until the agent finishes or is canceled.",
+      description: "Deploy one focused sub-agent in the background and return immediately after launch. Use this ONLY when delegation has a real benefit: the user explicitly asks for agents, the task contains multiple independent investigations that should run in parallel, a large read-heavy exploration would pollute your own context, or a substantial bounded implementation can be owned independently. NEVER deploy an agent for a simple lookup, a small edit, a task you can finish in a few normal tool calls, or merely to avoid doing the work yourself. The agent has a separate persistent context, uses the selected chat permission mode, cannot speak to the user, and cannot deploy agents. You receive an automatic internal completion event with its report later; no wait or polling tool exists. Multiple deploy_agent calls in the same response launch in parallel.",
       parameters: {
         type: "object",
         properties: {
@@ -1042,7 +1044,7 @@ const toolSpecs = [
     type: "function",
     function: {
       name: "continue_agent",
-      description: "Run an existing agent again with its preserved context and wait for the new report. Use the exact agent_id previously returned by deploy_agent. Use this only when the same specialist genuinely benefits from its earlier findings; never use it for a simple task. The agent keeps its name, description and tool profile, uses the current chat permission mode for this run, and cannot speak to the user or deploy other agents.",
+      description: "Launch another background run of an existing agent with its preserved context and return immediately. Use the exact agent_id previously returned by deploy_agent. Use this only when the same specialist genuinely benefits from its earlier findings; never use it for a simple task. The agent keeps its name, description and tool profile, uses the current chat permission mode for this run, and cannot speak to the user or deploy other agents. You receive its report later through an automatic internal completion event.",
       parameters: {
         type: "object",
         properties: {
@@ -2340,7 +2342,6 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       visualContext,
       chatId,
       turnId,
-      parentSignal: turnSignal,
       onProgress,
       payload: runtime.payload || {},
     });
@@ -2714,7 +2715,7 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   ];
   lines.push(personalityTone[payload.personality] || personalityTone.pragmatic);
   if (!payload.agentSession) {
-    lines.push("You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Multiple consecutive deploy_agent calls run in parallel. Each call waits for its agent to finish, then returns only the final report. Sub-agents cannot talk to the user or deploy agents themselves.");
+    lines.push("You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Deploy and continue calls return immediately after launch, so you can launch multiple useful agents or continue other independent work without waiting. Never poll: the app sends you an automatic internal event with the final report when an agent finishes. Sub-agents cannot talk to the user or deploy agents themselves.");
     if (Array.isArray(payload.agentModels) && payload.agentModels.length) {
       lines.push(`Available agent models in the current UI: ${payload.agentModels.join(", ")}.`);
     }
@@ -3405,6 +3406,66 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
   return message;
 };
 
+const streamAgentModel = async (settings, body, onEvent, signal, target = null, onDraft = null) => {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const controller = new AbortController();
+    let timeoutKind = "";
+    let timer = null;
+    const abortFromParent = () => controller.abort();
+    const arm = (delay, kind) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        timeoutKind = kind;
+        controller.abort();
+      }, delay);
+      timer.unref?.();
+    };
+    const touch = () => arm(agentStreamIdleTimeout, "stream_idle_timeout");
+    const emit = (event) => {
+      touch();
+      onEvent(event);
+    };
+    const draft = onDraft ? (message) => {
+      touch();
+      onDraft(message);
+    } : null;
+    signal?.addEventListener?.("abort", abortFromParent, { once: true });
+    arm(agentFirstTokenTimeout, "first_token_timeout");
+    try {
+      const message = await streamOpenRouter(settings, body, emit, controller.signal, target, draft);
+      if (timeoutKind) {
+        const error = new Error(timeoutKind === "first_token_timeout"
+          ? "Agent model produced no first stream event before the timeout."
+          : "Agent model stream became idle before completion.");
+        error.code = timeoutKind;
+        throw error;
+      }
+      return message;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      if (timeoutKind === "first_token_timeout" && attempt === 0) {
+        continue;
+      }
+      if (timeoutKind && !error.code) {
+        error.code = timeoutKind;
+      }
+      throw error;
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      signal?.removeEventListener?.("abort", abortFromParent);
+    }
+  }
+  const error = new Error("Agent model did not start streaming.");
+  error.code = "first_token_timeout";
+  throw error;
+};
+
 const digestMessageText = (content) => {
   if (typeof content === "string") {
     return content;
@@ -3514,7 +3575,7 @@ const summarizeAgentContext = async ({ settings, modelEntry, payload, session, m
     { role: "user", content: prompt },
   ], []);
   const target = modelEntry?.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
-  const response = await streamOpenRouter(settings, body, () => {}, signal, target);
+  const response = await streamAgentModel(settings, body, () => {}, signal, target);
   const summary = String(response.content || "").trim().slice(0, 60000);
   if (!summary) {
     throw new Error("Agent context compression returned an empty checkpoint.");
@@ -3538,7 +3599,25 @@ const emitAgentPermission = (event) => {
   }
 };
 
-const runDelegatedAgent = async ({
+const resolveAgentEffort = (modelEntry, selected, previous = "") => {
+  const efforts = Array.isArray(modelEntry.efforts) ? modelEntry.efforts : [];
+  const aliases = {
+    xhigh: ["max"],
+    max: ["xhigh"],
+  };
+  for (const candidate of [selected, previous]) {
+    if (efforts.includes(candidate)) {
+      return candidate;
+    }
+    const alias = (aliases[candidate] || []).find((value) => efforts.includes(value));
+    if (alias) {
+      return alias;
+    }
+  }
+  return modelEntry.defaultEffort || efforts[0] || "";
+};
+
+const runDelegatedAgentTask = async ({
   action,
   args,
   projectPath,
@@ -3550,10 +3629,9 @@ const runDelegatedAgent = async ({
   visualContext,
   chatId,
   turnId,
-  parentSignal,
   onProgress,
   payload,
-}) => {
+}, onStarted) => {
   if (!agentSessionManager) {
     return { error: "Agent session manager is unavailable." };
   }
@@ -3573,9 +3651,7 @@ const runDelegatedAgent = async ({
   if (modelEntry.apiProvider === "nvidia" && !settings.nvidia?.enabled) {
     return { error: "The selected NVIDIA agent model is disabled in Settings." };
   }
-  const effort = (modelEntry.efforts || []).includes(payload.effort)
-    ? payload.effort
-    : ((modelEntry.efforts || []).includes(existing?.effort) ? existing.effort : modelEntry.defaultEffort);
+  const effort = resolveAgentEffort(modelEntry, payload.effort, existing?.effort);
   const started = await agentSessionManager.begin({
     agentId: action === "continue" ? args.agent_id : "",
     chatId,
@@ -3593,17 +3669,13 @@ const runDelegatedAgent = async ({
   }
   const { session, run } = started;
   const controller = new AbortController();
-  const onParentAbort = () => controller.abort();
-  parentSignal?.addEventListener?.("abort", onParentAbort, { once: true });
+  let runtimeExpired = false;
+  const runtimeTimer = setTimeout(() => {
+    runtimeExpired = true;
+    controller.abort();
+  }, agentRuntimeLimit);
+  runtimeTimer.unref?.();
   agentSessionManager.attachController(session.id, run.id, controller);
-  onProgress?.({
-    agent: true,
-    status: "running",
-    agentId: session.id,
-    runId: run.id,
-    name: session.name,
-    model: session.model,
-  });
   const agentPayload = {
     ...payload,
     model: session.model,
@@ -3616,11 +3688,24 @@ const runDelegatedAgent = async ({
     memoryText: "",
     agentSession: { id: session.id, profile: session.profile },
   };
-  let messages = [
-    { role: "system", content: buildAgentSystemPrompt(index, mode, agentPayload, session) },
-    ...(Array.isArray(session.context) ? session.context : []),
-    { role: "user", content: String(args.prompt || "") },
-  ];
+  let messages;
+  try {
+    messages = [
+      { role: "system", content: buildAgentSystemPrompt(index, mode, agentPayload, session) },
+      ...(Array.isArray(session.context) ? session.context : []),
+      { role: "user", content: String(args.prompt || "") },
+    ];
+  } catch (error) {
+    clearTimeout(runtimeTimer);
+    agentSessionManager.detachController(session.id, run.id);
+    await agentSessionManager.finish(session.id, run.id, {
+      status: "failed",
+      report: `Agent failed: ${String(error?.message || error).slice(0, 1000)}`,
+      stopReason: "error",
+      writtenFiles: [],
+    });
+    return { error: String(error?.message || error) };
+  }
   let summary = session.summary || "";
   let terminalText = "";
   let stopReason = "done";
@@ -3633,11 +3718,20 @@ const runDelegatedAgent = async ({
     payload: agentPayload,
     commandBudget: { count: 0 },
   };
+  onProgress?.({
+    agent: true,
+    status: "running",
+    agentId: session.id,
+    runId: run.id,
+    name: session.name,
+    model: session.model,
+  });
+  onStarted?.({ session, run });
   try {
     for (let round = 0; round < maxToolRounds; round += 1) {
       if (controller.signal.aborted) {
-        status = "canceled";
-        stopReason = parentSignal?.aborted ? "parent_stopped" : "user_canceled";
+        status = runtimeExpired ? "interrupted" : "canceled";
+        stopReason = runtimeExpired ? "runtime_limit" : "user_canceled";
         break;
       }
       if (Date.now() - startedAt >= agentRuntimeLimit) {
@@ -3672,18 +3766,18 @@ const runDelegatedAgent = async ({
       const body = buildRequestBody(modelEntry, settings, agentPayload, messages, specs);
       const target = modelEntry.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
       let textEntryId = "";
-      const message = await streamOpenRouter(settings, body, (event) => {
+      const message = await streamAgentModel(settings, body, (event) => {
         if (event.type === "delta" && event.delta) {
           if (!textEntryId) {
             textEntryId = agentSessionManager.addEntry(session.id, run.id, { type: "text", text: "" });
           }
           agentSessionManager.appendText(session.id, run.id, textEntryId, event.delta);
         }
-      }, controller.signal, target);
+      }, controller.signal, target, () => {});
       messages.push(message);
       if (controller.signal.aborted) {
-        status = "canceled";
-        stopReason = parentSignal?.aborted ? "parent_stopped" : "user_canceled";
+        status = runtimeExpired ? "interrupted" : "canceled";
+        stopReason = runtimeExpired ? "runtime_limit" : "user_canceled";
         break;
       }
       const calls = message.tool_calls || [];
@@ -3710,15 +3804,6 @@ const runDelegatedAgent = async ({
         });
         let result;
         const progress = (info) => {
-          onProgress?.({
-            agent: true,
-            status: "running",
-            agentId: session.id,
-            runId: run.id,
-            name: session.name,
-            model: session.model,
-            activity: call.function.name,
-          });
           if (info?.stdout || info?.stderr) {
             agentSessionManager.setProgress(
               session.id,
@@ -3818,7 +3903,7 @@ const runDelegatedAgent = async ({
       ], []);
       const target = modelEntry.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
       let finalEntryId = "";
-      const finalMessage = await streamOpenRouter(settings, finalBody, (event) => {
+      const finalMessage = await streamAgentModel(settings, finalBody, (event) => {
         if (event.type === "delta" && event.delta) {
           if (!finalEntryId) {
             finalEntryId = agentSessionManager.addEntry(session.id, run.id, { type: "text", text: "", final: true });
@@ -3831,16 +3916,16 @@ const runDelegatedAgent = async ({
     }
   } catch (error) {
     if (controller.signal.aborted) {
-      status = "canceled";
-      stopReason = parentSignal?.aborted ? "parent_stopped" : "user_canceled";
+      status = runtimeExpired ? "interrupted" : "canceled";
+      stopReason = runtimeExpired ? "runtime_limit" : "user_canceled";
     } else {
       status = "failed";
-      stopReason = "error";
+      stopReason = error?.code || "error";
       terminalText = terminalText || `Agent failed: ${String(error?.message || error).slice(0, 1000)}`;
       agentSessionManager.addEntry(session.id, run.id, { type: "error", text: String(error?.message || error) });
     }
   } finally {
-    parentSignal?.removeEventListener?.("abort", onParentAbort);
+    clearTimeout(runtimeTimer);
     agentSessionManager.detachController(session.id, run.id);
   }
   const writtenFiles = collectWrittenFiles(toolEvents);
@@ -3850,14 +3935,6 @@ const runDelegatedAgent = async ({
     report: terminalText,
     stopReason,
     writtenFiles,
-  });
-  onProgress?.({
-    agent: true,
-    status: finished?.status || status,
-    agentId: session.id,
-    runId: run.id,
-    name: session.name,
-    model: session.model,
   });
   return {
     agent: true,
@@ -3872,6 +3949,48 @@ const runDelegatedAgent = async ({
     stopReason,
     report: capTranscriptText(terminalText, 30000),
     writtenFiles,
+  };
+};
+
+const runDelegatedAgent = async (options) => {
+  let resolveStarted;
+  const started = new Promise((resolve) => {
+    resolveStarted = resolve;
+  });
+  const task = runDelegatedAgentTask(options, resolveStarted);
+  const outcome = await Promise.race([
+    started.then((value) => ({ type: "started", value })),
+    task.then(
+      (value) => ({ type: "result", value }),
+      (error) => ({ type: "error", error }),
+    ),
+  ]);
+  if (outcome.type === "error") {
+    return { error: String(outcome.error?.message || outcome.error) };
+  }
+  if (outcome.type === "result") {
+    return outcome.value;
+  }
+  const { session, run } = outcome.value;
+  task.catch(async (error) => {
+    agentSessionManager?.addEntry(session.id, run.id, { type: "error", text: String(error?.message || error) });
+    await agentSessionManager?.finish(session.id, run.id, {
+      status: "failed",
+      report: `Agent failed: ${String(error?.message || error).slice(0, 1000)}`,
+      stopReason: "error",
+      writtenFiles: [],
+    });
+  });
+  return {
+    agent: true,
+    deployed: true,
+    agentId: session.id,
+    runId: run.id,
+    name: session.name,
+    model: session.model,
+    effort: session.effort,
+    profile: session.profile,
+    status: "deployed",
   };
 };
 
@@ -4721,8 +4840,19 @@ ipcMain.handle("background:deleteChat", async (_, chatId) => {
   ]);
   return { removed: Number(tasks.removed || 0) + Number(agents.removed || 0) };
 });
-ipcMain.handle("background:claim", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.claimPending(chatId) : null);
-ipcMain.handle("background:settleNotification", async (_, id, delivered) => backgroundTaskManager ? await backgroundTaskManager.settleNotification(id, Boolean(delivered)) : false);
+ipcMain.handle("background:claim", async (_, chatId) => {
+  const task = backgroundTaskManager ? await backgroundTaskManager.claimPending(chatId) : null;
+  if (task) {
+    return task;
+  }
+  return agentSessionManager ? await agentSessionManager.claimPending(chatId) : null;
+});
+ipcMain.handle("background:settleNotification", async (_, id, delivered) => {
+  if (String(id || "").startsWith("agent_run_")) {
+    return agentSessionManager ? await agentSessionManager.settleNotification(id, Boolean(delivered)) : false;
+  }
+  return backgroundTaskManager ? await backgroundTaskManager.settleNotification(id, Boolean(delivered)) : false;
+});
 ipcMain.handle("agent:transcript", (_, agentId, runId) => agentSessionManager?.getTranscript(agentId, runId) || null);
 
 ipcMain.handle("models:get", async () => await modelCatalog());

@@ -1291,6 +1291,18 @@ textarea {
   color: var(--faint);
 }
 
+.background-task-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.background-task-effort {
+  flex: none;
+  text-transform: capitalize;
+}
+
 .background-task-card.is-failed .background-task-status {
   color: var(--danger);
 }

@@ -68,6 +68,12 @@ const firstTranscript = manager.getTranscript(first.session.id, first.run.id);
 assert.equal(firstTranscript.run.transcript[0].type, "prompt");
 assert.equal(firstTranscript.run.transcript.filter((entry) => entry.type === "progress" && entry.parentId === toolEntry).length, 0);
 assert.equal(firstTranscript.run.writtenFiles.length, 1);
+const notification = await manager.claimPending("chat-1");
+assert.equal(notification.kind, "agent");
+assert.equal(notification.agentId, first.session.id);
+assert.equal(notification.report, "Done");
+assert.equal(await manager.settleNotification(notification.id, true), true);
+assert.equal(await manager.claimPending("chat-1"), null);
 
 const continued = await manager.begin({
   agentId: first.session.id,

@@ -35,6 +35,7 @@ const publicAgent = (session) => {
     description: session.description,
     category: "Agent",
     model: run?.model || session.model,
+    effort: run?.effort || session.effort,
     profile: session.profile,
     status: run?.status || "completed",
     startedAt: run?.startedAt || session.createdAt,
@@ -174,12 +175,17 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
           report: String(run.report || "").slice(0, maxReportChars),
           writtenFiles: Array.isArray(run.writtenFiles) ? run.writtenFiles.map(String).slice(0, 200) : [],
           transcript: capTranscript(run.transcript),
+          notificationState: ["pending", "sending", "delivered"].includes(run.notificationState) ? run.notificationState : "delivered",
         };
         if (next.status === "running") {
           next.status = "interrupted";
           next.finishedAt = now;
           next.durationMs = Math.max(0, Date.now() - new Date(next.startedAt).getTime());
           next.stopReason = "app_closed";
+          next.notificationState = "delivered";
+          changed = true;
+        } else if (next.notificationState === "sending") {
+          next.notificationState = "pending";
           changed = true;
         }
         return next;
@@ -284,6 +290,7 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
       report: "",
       writtenFiles: [],
       transcript: [{ id: `entry_${randomUUID()}`, type: "prompt", text: cleanPrompt, at: now }],
+      notificationState: "delivered",
     };
     session.runs.push(run);
     session.runs = session.runs.slice(-maxRuns);
@@ -399,6 +406,7 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
       found.run.stopReason = String(stopReason || "");
       found.run.report = String(report || "").slice(0, maxReportChars);
       found.run.writtenFiles = [...new Set((writtenFiles || []).map(String))].slice(0, 200);
+      found.run.notificationState = found.run.status === "canceled" || found.run.status === "interrupted" ? "delivered" : "pending";
     }
     found.session.updatedAt = new Date().toISOString();
     detachController(agentId, runId);
@@ -422,6 +430,7 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     run.finishedAt = new Date().toISOString();
     run.durationMs = Math.max(0, Date.now() - new Date(run.startedAt).getTime());
     run.stopReason = "user_canceled";
+    run.notificationState = "delivered";
     session.updatedAt = run.finishedAt;
     controller?.abort();
     detachController(session.id, run.id);
@@ -463,6 +472,62 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
         durationMs: entry.durationMs,
       })),
     };
+  };
+
+  const claimPending = async (chatId) => {
+    const candidates = [];
+    for (const session of sessions.values()) {
+      if (session.chatId !== String(chatId || "")) {
+        continue;
+      }
+      for (const run of session.runs) {
+        if (run.notificationState === "pending") {
+          candidates.push({ session, run });
+        }
+      }
+    }
+    candidates.sort((a, b) => String(a.run.finishedAt || "").localeCompare(String(b.run.finishedAt || "")));
+    const found = candidates[0];
+    if (!found) {
+      return null;
+    }
+    found.run.notificationState = "sending";
+    await persist();
+    return {
+      kind: "agent",
+      id: found.run.id,
+      agentId: found.session.id,
+      runId: found.run.id,
+      chatId: found.session.chatId,
+      turnId: found.run.turnId,
+      name: found.session.name,
+      description: found.session.description,
+      category: "Agent",
+      model: found.run.model,
+      effort: found.run.effort,
+      profile: found.session.profile,
+      status: found.run.status,
+      startedAt: found.run.startedAt,
+      finishedAt: found.run.finishedAt,
+      durationMs: found.run.durationMs,
+      stopReason: found.run.stopReason,
+      report: found.run.report,
+      writtenFiles: found.run.writtenFiles,
+    };
+  };
+
+  const settleNotification = async (runId, delivered) => {
+    for (const session of sessions.values()) {
+      const run = session.runs.find((entry) => entry.id === String(runId || ""));
+      if (!run || run.notificationState !== "sending") {
+        continue;
+      }
+      run.notificationState = delivered ? "delivered" : "pending";
+      session.updatedAt = new Date().toISOString();
+      await persist();
+      return true;
+    }
+    return false;
   };
 
   const clearFinished = async (chatId) => {
@@ -518,6 +583,7 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
       run.finishedAt = now;
       run.durationMs = Math.max(0, Date.now() - new Date(run.startedAt).getTime());
       run.stopReason = "app_closed";
+      run.notificationState = "delivered";
       session.updatedAt = now;
     }
     controllers.clear();
@@ -541,6 +607,8 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     list,
     get,
     getTranscript,
+    claimPending,
+    settleNotification,
     clearFinished,
     deleteChat,
     shutdown,

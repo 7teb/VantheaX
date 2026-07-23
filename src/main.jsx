@@ -1029,6 +1029,27 @@ const formatSize = (value) => {
 
 const backgroundContinuationPrompt = (task) => {
   const duration = Math.max(0, Math.round((Number(task.durationMs) || 0) / 1000));
+  if (task.kind === "agent") {
+    const report = String(task.report || "").trim();
+    const files = Array.isArray(task.writtenFiles) ? task.writtenFiles : [];
+    return [
+      "[BACKGROUND AGENT EVENT]",
+      "This is an internal app event, not a new message written by the user.",
+      "A sub-agent that you deployed earlier in this chat has finished.",
+      `Agent ID: ${task.agentId}`,
+      `Run ID: ${task.runId}`,
+      `Name: ${task.name}`,
+      `Model: ${task.model}`,
+      `Effort: ${task.effort}`,
+      `Profile: ${task.profile}`,
+      `Status: ${task.status}`,
+      `Duration: ${duration}s`,
+      task.stopReason ? `Stop reason: ${task.stopReason}` : "",
+      files.length ? `Written files:\n${files.join("\n")}` : "Written files: none",
+      report ? `Agent report:\n${report}` : "Agent report: empty",
+      "Use this report as new internal evidence and continue the original work if it is still relevant. Do not say the user sent this event. Do not merely announce that the agent finished; provide a meaningful result, take the next required action, or stay concise if no further work remains.",
+    ].filter(Boolean).join("\n\n");
+  }
   const output = String(task.stdoutTail || "").trim();
   const errors = String(task.stderrTail || "").trim();
   return [
@@ -3187,7 +3208,7 @@ const App = () => {
     }
     activeRequestRef.current = null;
     activeMsgRef.current = null;
-    setPermissionQueue([]);
+    setPermissionQueue((current) => current.filter((item) => item.agentId));
     setBusy(false);
   };
 
@@ -4508,6 +4529,7 @@ const BackgroundTaskCard = ({ task, onTranscript }) => {
         <div className="background-task-meta">
           <span>{task.category || t("background.process")}</span>
           {isAgent && task.model && <><span className="background-task-dot">·</span><span className="background-task-model">{task.model}</span></>}
+          {isAgent && task.effort && <><span className="background-task-dot">·</span><span className="background-task-effort">{task.effort}</span></>}
           <span className="background-task-dot">·</span>
           <span className="background-task-status">{status}</span>
           <span className="background-task-dot">·</span>
@@ -4631,7 +4653,7 @@ const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
         </div>
       </div>
       <div className="agent-transcript-meta">
-        <span>{data?.agent?.model || task.model}</span>
+        <span>{data?.agent?.model || task.model} · {data?.agent?.effort || task.effort}</span>
         <span>{task.agentId || task.id}</span>
         {(data?.runs?.length || 0) > 1 && (
           <select value={runId} onChange={(event) => {
