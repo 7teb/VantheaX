@@ -68,5 +68,6 @@ check(deletableAttachmentNames([sourceChat], "source")[0] === "shared.png", "uns
 check(source.includes("<ForkIcon size={13} />"), "assistant actions use the requested fork icon");
 check(source.includes("onFork={forkChat}"), "assistant messages receive the fork action");
 check(source.includes('title={t("action.copy")}'), "assistant messages expose copy");
+check(source.includes("message.done !== false && !message.backgroundTaskId"), "internal background continuations do not expose copy or fork actions");
 
 console.log(`${passed} chat fork checks passed`);

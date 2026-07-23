@@ -5,6 +5,18 @@ contextBridge.exposeInMainWorld("agentApi", {
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
   loadChats: () => ipcRenderer.invoke("chats:load"),
   saveChats: (chats) => ipcRenderer.invoke("chats:save", chats),
+  listBackgroundTasks: (chatId) => ipcRenderer.invoke("background:list", chatId),
+  getBackgroundTask: (id) => ipcRenderer.invoke("background:get", id),
+  cancelBackgroundTask: (id) => ipcRenderer.invoke("background:cancel", id),
+  clearBackgroundTasks: (chatId) => ipcRenderer.invoke("background:clear", chatId),
+  deleteBackgroundTasks: (chatId) => ipcRenderer.invoke("background:deleteChat", chatId),
+  claimBackgroundNotification: (chatId) => ipcRenderer.invoke("background:claim", chatId),
+  settleBackgroundNotification: (id, delivered) => ipcRenderer.invoke("background:settleNotification", id, delivered),
+  onBackgroundEvent: (handler) => {
+    const listener = (_, event) => handler(event);
+    ipcRenderer.on("background:event", listener);
+    return () => ipcRenderer.removeListener("background:event", listener);
+  },
   getModels: () => ipcRenderer.invoke("models:get"),
   getBalance: () => ipcRenderer.invoke("key:balance"),
   extractMemories: (payload) => ipcRenderer.invoke("memory:extract", payload),

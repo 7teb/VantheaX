@@ -12,7 +12,7 @@ let LANG = "en";
 const STRINGS = {
   en: {
     "mode.code": "Code",
-    "mode.codeDesc": "Read, write and run code in your project",
+    "mode.codeDesc": "Read, write and run code",
     "mode.voice": "Voice",
     "mode.voiceDesc": "Talk to it and let it drive your PC",
     "nav.newChat": "New chat",
@@ -261,6 +261,22 @@ const STRINGS = {
     "terminal.exitFullscreen": "Exit fullscreen",
     "terminal.exited": "process exited with code {code}",
     "terminal.resize": "Drag to resize",
+    "background.title": "Background Tasks",
+    "background.running": "Running {n}",
+    "background.finished": "Finished {n}",
+    "background.none": "No background tasks in this chat",
+    "background.clear": "Clear",
+    "background.cancel": "Cancel task",
+    "background.close": "Close background tasks",
+    "background.fullscreen": "Fullscreen",
+    "background.exitFullscreen": "Exit fullscreen",
+    "background.started": "Started background task",
+    "background.runningStatus": "Running",
+    "background.completed": "Completed",
+    "background.failed": "Failed",
+    "background.canceled": "Canceled",
+    "background.interrupted": "Interrupted",
+    "background.process": "Process",
     "fc.undo": "Undo",
     "fc.review": "Review",
     "fc.reverted": "Reverted",
@@ -342,9 +358,9 @@ const STRINGS = {
   },
   de: {
     "mode.code": "Code",
-    "mode.codeDesc": "Code im Projekt lesen, schreiben und ausführen",
+    "mode.codeDesc": "Code lesen, schreiben, ausführen",
     "mode.voice": "Voice",
-    "mode.voiceDesc": "Sprich mit ihr und lass sie deinen PC steuern",
+    "mode.voiceDesc": "Mit ihr sprechen und den PC steuern",
     "nav.newChat": "Neuer Chat",
     "nav.search": "Suche",
     "nav.openProject": "Projekt öffnen",
@@ -591,6 +607,22 @@ const STRINGS = {
     "terminal.exitFullscreen": "Vollbild verlassen",
     "terminal.exited": "Prozess mit Code {code} beendet",
     "terminal.resize": "Zum Anpassen ziehen",
+    "background.title": "Background Tasks",
+    "background.running": "{n} läuft",
+    "background.finished": "{n} abgeschlossen",
+    "background.none": "Keine Background Tasks in diesem Chat",
+    "background.clear": "Leeren",
+    "background.cancel": "Task abbrechen",
+    "background.close": "Background Tasks schließen",
+    "background.fullscreen": "Vollbild",
+    "background.exitFullscreen": "Vollbild verlassen",
+    "background.started": "Background Task gestartet",
+    "background.runningStatus": "Läuft",
+    "background.completed": "Abgeschlossen",
+    "background.failed": "Fehlgeschlagen",
+    "background.canceled": "Abgebrochen",
+    "background.interrupted": "Unterbrochen",
+    "background.process": "Prozess",
     "fc.undo": "Rückgängig machen",
     "fc.review": "Überprüfen",
     "fc.reverted": "Rückgängig gemacht",
@@ -965,6 +997,26 @@ const formatSize = (value) => {
     return `${(value / 1024).toFixed(1)} KB`;
   }
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+};
+
+const backgroundContinuationPrompt = (task) => {
+  const duration = Math.max(0, Math.round((Number(task.durationMs) || 0) / 1000));
+  const output = String(task.stdoutTail || "").trim();
+  const errors = String(task.stderrTail || "").trim();
+  return [
+    "[BACKGROUND TASK EVENT]",
+    "This is an internal app event, not a new message written by the user.",
+    "A long-running task that you started earlier in this chat has finished.",
+    `ID: ${task.id}`,
+    `Name: ${task.name}`,
+    `Category: ${task.category}`,
+    `Status: ${task.status}`,
+    `Exit code: ${task.exitCode == null ? "none" : task.exitCode}`,
+    `Duration: ${duration}s`,
+    output ? `STDOUT tail:\n${output}` : "STDOUT tail: empty",
+    errors ? `STDERR tail:\n${errors}` : "STDERR tail: empty",
+    "Continue the original work now if this result unblocks it. Use tools normally when needed. Do not claim the user sent this event, do not merely announce the status, and produce user-facing text only when there is a meaningful result or next action.",
+  ].join("\n\n");
 };
 
 const folderName = (pathValue) => {
@@ -1371,6 +1423,83 @@ const contextUsageStore = (() => {
 
 const useContextUsage = () => useSyncExternalStore(contextUsageStore.subscribe, contextUsageStore.getUsage);
 
+const backgroundTaskStore = (() => {
+  const subscribers = new Set();
+  const cache = new Map();
+  let activeChatId = "";
+  let current = [];
+  let sequence = 0;
+
+  const emit = () => {
+    for (const subscriber of subscribers) {
+      subscriber();
+    }
+  };
+
+  const setChatTasks = (chatId, tasks) => {
+    const next = Array.isArray(tasks) ? tasks : [];
+    cache.set(chatId, next);
+    if (chatId === activeChatId) {
+      current = next;
+      emit();
+    }
+  };
+
+  return {
+    activate(chatId) {
+      activeChatId = String(chatId || "");
+      current = cache.get(activeChatId) || [];
+      emit();
+      if (!activeChatId) {
+        return;
+      }
+      const request = ++sequence;
+      api.listBackgroundTasks(activeChatId).then((tasks) => {
+        if (request !== sequence || activeChatId !== chatId) {
+          return;
+        }
+        setChatTasks(activeChatId, tasks);
+      }).catch(() => {});
+    },
+    applyEvent(event) {
+      const chatId = String(event?.task?.chatId || event?.chatId || "");
+      if (!chatId) {
+        return;
+      }
+      if (event.type === "cleared") {
+        setChatTasks(chatId, (cache.get(chatId) || []).filter((task) => task.status === "running"));
+        return;
+      }
+      const task = event.task;
+      if (!task?.id) {
+        return;
+      }
+      const previous = cache.get(chatId) || [];
+      const at = previous.findIndex((entry) => entry.id === task.id);
+      const next = at >= 0
+        ? previous.map((entry, index) => index === at ? task : entry)
+        : [task, ...previous];
+      setChatTasks(chatId, next);
+    },
+    removeChat(chatId) {
+      cache.delete(String(chatId || ""));
+      if (activeChatId === String(chatId || "")) {
+        current = [];
+        emit();
+      }
+    },
+    getTasks() {
+      return current;
+    },
+    subscribe(fn) {
+      subscribers.add(fn);
+      return () => subscribers.delete(fn);
+    },
+  };
+})();
+
+const useBackgroundTasks = () => useSyncExternalStore(backgroundTaskStore.subscribe, backgroundTaskStore.getTasks);
+
 const createStreamPacer = (apply, beforeText = null) => {
   const queue = [];
   let queuedChars = 0;
@@ -1714,11 +1843,17 @@ const App = () => {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalFull, setTerminalFull] = useState(false);
   const [termClosing, setTermClosing] = useState(false);
+  const [backgroundOpen, setBackgroundOpen] = useState(false);
+  const [backgroundFull, setBackgroundFull] = useState(false);
+  const [backgroundClosing, setBackgroundClosing] = useState(false);
+  const [backgroundWake, setBackgroundWake] = useState(0);
   const [termTabs, setTermTabs] = useState([]);
   const [termActive, setTermActive] = useState(0);
   const [termWidth, setTermWidth] = useState(() => Math.round((typeof window !== "undefined" ? window.innerWidth : 1280) * 0.42));
   const termSeq = useRef(0);
   const termCloseTimer = useRef(null);
+  const backgroundCloseTimer = useRef(null);
+  const backgroundPumpRef = useRef(false);
   const [pendingCompact, setPendingCompact] = useState(null);
   const [compressing, setCompressing] = useState(false);
   const [projectIndex, setProjectIndex] = useState(emptyIndex);
@@ -1761,6 +1896,7 @@ const App = () => {
   const chatsLoadedRef = useRef(false);
   const activeRequestRef = useRef(null);
   const activeMsgRef = useRef(null);
+  const activeChatIdRef = useRef("");
   const messagesRef = useRef(null);
   const compactingRef = useRef(false);
   const pacerRef = useRef(null);
@@ -1782,6 +1918,17 @@ const App = () => {
   }, []);
 
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [chats, activeChatId]);
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+    backgroundTaskStore.activate(activeChatId);
+    setBackgroundWake((value) => value + 1);
+  }, [activeChatId]);
+
+  useEffect(() => api.onBackgroundEvent((event) => {
+    backgroundTaskStore.applyEvent(event);
+    setBackgroundWake((value) => value + 1);
+  }), []);
+
   useEffect(() => {
     if (busy) {
       return;
@@ -2054,6 +2201,8 @@ const App = () => {
     if (names.length) {
       api.deleteImages(names).catch(() => {});
     }
+    api.deleteBackgroundTasks(chatId).catch(() => {});
+    backgroundTaskStore.removeChat(chatId);
     updateChats((current) => current.filter((chat) => chat.id !== chatId));
     if (activeChatId === chatId) {
       setActiveChatId("");
@@ -2449,6 +2598,28 @@ const App = () => {
   };
 
   const openRightPanel = (view) => {
+    if (view === "background") {
+      setRightPanel("");
+      if (termCloseTimer.current) {
+        clearTimeout(termCloseTimer.current);
+        termCloseTimer.current = null;
+      }
+      setTerminalOpen(false);
+      setTerminalFull(false);
+      setTermClosing(false);
+      setTermTabs([]);
+      if (backgroundCloseTimer.current) {
+        clearTimeout(backgroundCloseTimer.current);
+        backgroundCloseTimer.current = null;
+      }
+      setInspectorOpen(false);
+      setBackgroundClosing(false);
+      setBackgroundOpen(true);
+      return;
+    }
+    if (backgroundOpen) {
+      closeBackground();
+    }
     setRightPanel(view);
   };
 
@@ -2475,6 +2646,19 @@ const App = () => {
     }, 260);
   };
 
+  const closeBackground = () => {
+    if (backgroundCloseTimer.current) {
+      clearTimeout(backgroundCloseTimer.current);
+    }
+    setBackgroundOpen(false);
+    setBackgroundFull(false);
+    setBackgroundClosing(true);
+    backgroundCloseTimer.current = setTimeout(() => {
+      setBackgroundClosing(false);
+      backgroundCloseTimer.current = null;
+    }, 260);
+  };
+
   const toggleTerminal = () => {
     if (terminalOpen) {
       closeTerminal();
@@ -2485,6 +2669,13 @@ const App = () => {
       termCloseTimer.current = null;
     }
     setTermClosing(false);
+    if (backgroundCloseTimer.current) {
+      clearTimeout(backgroundCloseTimer.current);
+      backgroundCloseTimer.current = null;
+    }
+    setBackgroundOpen(false);
+    setBackgroundFull(false);
+    setBackgroundClosing(false);
     setInspectorOpen(false);
     if (!termTabs.length) {
       addTermTab();
@@ -2529,7 +2720,7 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (!terminalOpen) {
+    if (!terminalOpen && !backgroundOpen) {
       return;
     }
     const onResize = () => {
@@ -2540,7 +2731,7 @@ const App = () => {
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [terminalOpen, sidebarCollapsed]);
+  }, [terminalOpen, backgroundOpen, sidebarCollapsed]);
 
   useEffect(() => {
     const chatId = activeChat?.id || "";
@@ -2622,16 +2813,20 @@ const App = () => {
 
   const sendMessage = async (overrideText = null, overrides = {}) => {
     const text = (typeof overrideText === "string" ? overrideText : input).trim();
+    const backgroundTask = overrides.backgroundTask || null;
+    const isBackgroundContinuation = Boolean(backgroundTask);
     const effectivePlanMode = overrides.planMode !== undefined ? overrides.planMode : planMode;
-    const effectiveGoal = goalMode ? (goalText.trim() || text) : "";
-    if (goalMode && !goalText.trim() && text) {
+    const effectiveGoal = goalMode ? (goalText.trim() || (isBackgroundContinuation ? "" : text)) : "";
+    if (!isBackgroundContinuation && goalMode && !goalText.trim() && text) {
       setGoalText(text);
     }
-    if ((!text && !imageAttachment) || busy || naming || compactingRef.current) {
-      return;
+    if ((!text && !imageAttachment) || busy || naming || compactingRef.current || (isBackgroundContinuation && backgroundTask.chatId !== activeChatIdRef.current)) {
+      return false;
     }
-    const attachment = imageAttachment;
-    setImageAttachment(null);
+    const attachment = isBackgroundContinuation ? null : imageAttachment;
+    if (!isBackgroundContinuation) {
+      setImageAttachment(null);
+    }
     let savedImage = null;
     if (attachment) {
       setBusy(true);
@@ -2643,8 +2838,10 @@ const App = () => {
         }
       } catch {}
     }
-    setTodos([]);
-    setGoalDone(false);
+    if (!isBackgroundContinuation) {
+      setTodos([]);
+      setGoalDone(false);
+    }
     const chat = activeChat || makeChat(projectPath);
     followBottom = true;
     const assistantId = crypto.randomUUID();
@@ -2654,12 +2851,15 @@ const App = () => {
       content: text || "Analyze this image.",
       attachment: savedImage ? { name: savedImage.name, path: savedImage.path, type: attachment.type, size: attachment.size, analysis: "" } : null,
       createdAt: new Date().toISOString(),
+      hidden: isBackgroundContinuation,
     };
-    const assistantDraft = { id: assistantId, role: "assistant", content: "", tools: [], segments: [], startedAt: Date.now(), done: false, createdAt: new Date().toISOString() };
+    const assistantDraft = { id: assistantId, role: "assistant", content: "", tools: [], segments: [], startedAt: Date.now(), done: false, createdAt: new Date().toISOString(), backgroundTaskId: backgroundTask?.id || "" };
     const previousMessages = chat.messages || [];
-    const nextMessages = [...previousMessages, userMessage, assistantDraft];
-    const needsTitle = chat.title === "New chat";
-    setInput("");
+    const nextMessages = [...previousMessages, ...(isBackgroundContinuation ? [] : [userMessage]), assistantDraft];
+    const needsTitle = !isBackgroundContinuation && chat.title === "New chat";
+    if (!isBackgroundContinuation) {
+      setInput("");
+    }
     let nextTitle = chat.title;
     if (needsTitle) {
       setNaming(true);
@@ -2796,6 +2996,7 @@ const App = () => {
     pacerRef.current = pacer;
     narrationStore.begin(requestId);
     let sawTool = false;
+    let turnSucceeded = false;
     try {
       const result = await api.sendMessage({
         requestId,
@@ -2834,8 +3035,17 @@ const App = () => {
       } else {
         await pacer.flushAfterGate();
       }
-      updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => (message.id === assistantId && !message.cancelled) ? { ...message, content: result.content || message.content, tools: result.tools || message.tools || [], done: true, workMs: message.workMs || (Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() } : item));
-      if (settings.memory?.enabled && result && result.content) {
+      const hasBackgroundOutput = Boolean(String(result?.content || "").trim() || (Array.isArray(result?.tools) && result.tools.length));
+      updateChats((current) => current.map((item) => {
+        if (item.id !== chat.id) {
+          return item;
+        }
+        if (isBackgroundContinuation && !hasBackgroundOutput) {
+          return { ...item, messages: item.messages.filter((message) => message.id !== assistantId), updatedAt: new Date().toISOString() };
+        }
+        return { ...item, messages: item.messages.map((message) => (message.id === assistantId && !message.cancelled) ? { ...message, content: result.content || message.content, tools: result.tools || message.tools || [], done: true, workMs: message.workMs || (Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() };
+      }));
+      if (!isBackgroundContinuation && settings.memory?.enabled && result && result.content) {
         const usedTools = Array.isArray(result.tools) && result.tools.some((tl) => tl.name === "web_search" || String(tl.name || "").startsWith("mcp__"));
         const convo = [...previousMessages, userMessage, { role: "assistant", content: result.content }]
           .filter((m) => m.role === "user" || m.role === "assistant")
@@ -2845,12 +3055,15 @@ const App = () => {
       if (activeRequestRef.current === requestId) {
         setStatus(t("status.ready"));
       }
+      turnSucceeded = true;
     } catch (error) {
       narrationStore.reset(requestId);
       pacer.flush();
       if (activeRequestRef.current === requestId) {
         const clean = String(error?.message || "").replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, "") || "The turn failed.";
-        const failedMessages = nextMessages.map((message) => message.id === assistantId ? { ...message, content: clean, error: true, tools: [], segments: [], done: true } : message);
+        const failedMessages = isBackgroundContinuation
+          ? nextMessages.filter((message) => message.id !== assistantId)
+          : nextMessages.map((message) => message.id === assistantId ? { ...message, content: clean, error: true, tools: [], segments: [], done: true } : message);
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: failedMessages, updatedAt: new Date().toISOString() } : item));
         contextUsageStore.end(requestId);
         requestContextSnapshot({ ...chat, messages: failedMessages });
@@ -2868,7 +3081,42 @@ const App = () => {
         activeMsgRef.current = null;
       }
     }
+    return turnSucceeded;
   };
+
+  useEffect(() => {
+    const chatId = activeChatId;
+    if (!chatId || busy || naming || compactingRef.current || backgroundPumpRef.current) {
+      return;
+    }
+    backgroundPumpRef.current = true;
+    const pump = async () => {
+      let task = null;
+      let delivered = false;
+      try {
+        task = await api.claimBackgroundNotification(chatId);
+        if (!task) {
+          return;
+        }
+        if (activeChatIdRef.current !== chatId || activeRequestRef.current) {
+          await api.settleBackgroundNotification(task.id, false);
+          return;
+        }
+        delivered = await sendMessage(backgroundContinuationPrompt(task), { backgroundTask: task });
+        await api.settleBackgroundNotification(task.id, delivered);
+      } catch {
+        if (task?.id) {
+          await api.settleBackgroundNotification(task.id, false).catch(() => {});
+        }
+      } finally {
+        backgroundPumpRef.current = false;
+        if (task && delivered) {
+          setBackgroundWake((value) => value + 1);
+        }
+      }
+    };
+    pump();
+  }, [activeChatId, busy, naming, backgroundWake]);
 
   const stopGeneration = () => {
     const active = activeMsgRef.current;
@@ -2957,7 +3205,7 @@ const App = () => {
   };
 
   return (
-    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
+    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""} ${backgroundOpen ? "background-open" : ""} ${backgroundOpen && backgroundFull ? "background-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
       <header className="titlebar">
         <div className="titlebar-left">
           <button className="chrome-button sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? t("title.sidebarOpen") : t("title.sidebarClose")}>
@@ -3083,7 +3331,7 @@ const App = () => {
           <button className="root-open-button" onClick={() => api.openRoot(projectPath, activeChat?.workspaceName || "")} title={t("panels.openRoot")}>
             <ListTreeIcon size={14} />
           </button>
-          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
+          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} backgroundOpen={backgroundOpen} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
           <ContextPanel open={rightPanel === "context"} onCompact={requestCompact} pendingCompact={pendingCompact} />
           <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={rightPanel === "tasks"} />
           {messages.length > 0 && (
@@ -3203,9 +3451,9 @@ const App = () => {
             <pre className="file-preview">{selectedContent || t("inspector.previewHint")}</pre>
           </aside>
         )}
-        {terminalOpen && !terminalFull && (
+        {(terminalOpen && !terminalFull) || (backgroundOpen && !backgroundFull) ? (
           <div className="terminal-resizer" onMouseDown={startTermResize} title={t("terminal.resize")} />
-        )}
+        ) : null}
         {(terminalOpen || termClosing) && (
           <TerminalPanel
             tabs={termTabs}
@@ -3218,6 +3466,13 @@ const App = () => {
             onSelectTab={setTermActive}
             onToggleFull={() => setTerminalFull((value) => !value)}
             onClose={closeTerminal}
+          />
+        )}
+        {(backgroundOpen || backgroundClosing) && (
+          <BackgroundTasksPanel
+            full={backgroundFull}
+            onToggleFull={() => setBackgroundFull((value) => !value)}
+            onClose={closeBackground}
           />
         )}
       </div>
@@ -3939,15 +4194,24 @@ const LayoutDashboardIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
-const PanelSwitch = ({ open, active, todos, onToggle, onPick }) => {
+const GitBranchPlusIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M6 3v12" /><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /><path d="M15 6a9 9 0 0 0-9 9" /><path d="M18 15v6" /><path d="M21 18h-6" />
+  </svg>
+);
+
+const PanelSwitch = ({ open, active, backgroundOpen, todos, onToggle, onPick }) => {
   const usage = useContextUsage();
+  const backgroundTasks = useBackgroundTasks();
   const budget = usage?.budget || 512000;
   const total = usage?.total || 0;
   const pct = budget > 0 ? Math.min(1, total / budget) : 0;
   const done = todos.filter((item) => item.done).length;
+  const running = backgroundTasks.filter((task) => task.status === "running").length;
+  const finished = backgroundTasks.length - running;
   return (
     <div className="panel-switch">
-      <button className={open || active ? "panel-switch-button is-on" : "panel-switch-button"} onClick={onToggle} title={t("panels.title")}>
+      <button className={open || active || backgroundOpen ? "panel-switch-button is-on" : "panel-switch-button"} onClick={onToggle} title={t("panels.title")}>
         <MoreVertical size={14} />
       </button>
       <div className={open ? "panel-menu open" : "panel-menu"}>
@@ -3963,6 +4227,13 @@ const PanelSwitch = ({ open, active, todos, onToggle, onPick }) => {
           <span className="brand-menu-text">
             <span className="brand-menu-title">{t("todo.tasks")}</span>
             <span className="brand-menu-desc">{todos.length ? `${done} / ${todos.length}` : t("todo.none")}</span>
+          </span>
+        </button>
+        <button className={backgroundOpen ? "brand-menu-row is-active" : "brand-menu-row"} onClick={() => onPick("background")}>
+          <span className="brand-menu-icon"><GitBranchPlusIcon size={17} /></span>
+          <span className="brand-menu-text">
+            <span className="brand-menu-title">{t("background.title")}</span>
+            <span className="brand-menu-desc">{running ? t("background.running", { n: running }) : t("background.finished", { n: finished })}</span>
           </span>
         </button>
       </div>
@@ -4134,6 +4405,98 @@ const TerminalPanel = ({ tabs, activeId, full, projectPath, workspaceName, onNew
     </div>
   </aside>
 );
+
+const formatTaskDuration = (task) => {
+  const duration = task.status === "running"
+    ? Math.max(0, Date.now() - new Date(task.startedAt).getTime())
+    : Math.max(0, Number(task.durationMs) || 0);
+  const seconds = Math.round(duration / 1000);
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${rest}s`;
+};
+
+const BackgroundTaskCard = ({ task }) => {
+  const [, refresh] = useState(0);
+  useEffect(() => {
+    if (task.status !== "running") {
+      return;
+    }
+    const timer = setInterval(() => refresh((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [task.status]);
+  const status = task.status === "running" ? t("background.runningStatus") : t(`background.${task.status}`);
+  return (
+    <article className={`background-task-card is-${task.status}`}>
+      <div className="background-task-copy">
+        <div className="background-task-name">{task.name}</div>
+        <div className="background-task-meta">
+          <span>{task.category || t("background.process")}</span>
+          <span className="background-task-dot">·</span>
+          <span className="background-task-status">{status}</span>
+          <span className="background-task-dot">·</span>
+          <span>{formatTaskDuration(task)}</span>
+        </div>
+        <div className="background-task-id">{task.id}</div>
+      </div>
+      {task.status === "running" && (
+        <button className="background-task-cancel" title={t("background.cancel")} onClick={() => api.cancelBackgroundTask(task.id)}>
+          <Square size={11} fill="currentColor" />
+        </button>
+      )}
+    </article>
+  );
+};
+
+const BackgroundTasksPanel = ({ full, onToggleFull, onClose }) => {
+  const tasks = useBackgroundTasks();
+  const [finishedOpen, setFinishedOpen] = useState(false);
+  const chatId = tasks[0]?.chatId || "";
+  useEffect(() => setFinishedOpen(false), [chatId]);
+  const running = tasks.filter((task) => task.status === "running");
+  const finished = tasks.filter((task) => task.status !== "running");
+  return (
+    <aside className="background-panel">
+      <div className="background-head">
+        <span className="background-heading">{t("background.title")}</span>
+        <div className="terminal-actions">
+          <button className="terminal-action" title={full ? t("background.exitFullscreen") : t("background.fullscreen")} onClick={onToggleFull}>
+            {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button className="terminal-action terminal-action-close" title={t("background.close")} onClick={onClose}><X size={16} /></button>
+        </div>
+      </div>
+      <div className="background-body">
+        {running.length > 0 && (
+          <section className="background-section">
+            <div className="background-section-label">{t("background.running", { n: running.length })}</div>
+            <div className="background-task-list">
+              {running.map((task) => <BackgroundTaskCard key={task.id} task={task} />)}
+            </div>
+          </section>
+        )}
+        <section className="background-section finished">
+          <div className="background-finished-head">
+            <button className={finishedOpen ? "background-finished-toggle is-open" : "background-finished-toggle"} onClick={() => setFinishedOpen((value) => !value)}>
+              <span>{t("background.finished", { n: finished.length })}</span>
+              <ChevronRight size={13} />
+            </button>
+            {finished.length > 0 && <button className="background-clear" onClick={() => api.clearBackgroundTasks(chatId)}>{t("background.clear")}</button>}
+          </div>
+          <div className={finishedOpen ? "background-finished-list is-open" : "background-finished-list"}>
+            <div className="background-finished-inner">
+              {finished.map((task) => <BackgroundTaskCard key={task.id} task={task} />)}
+            </div>
+          </div>
+        </section>
+        {!tasks.length && <div className="background-empty">{t("background.none")}</div>}
+      </div>
+    </aside>
+  );
+};
 
 const ContextPanel = ({ open, onCompact, pendingCompact }) => {
   const usage = useContextUsage();
@@ -4663,6 +5026,14 @@ const ToolStep = ({ tool }) => {
   const Icon = getToolIcon(tool.name);
   const label = getToolLabel(tool);
   const isMemory = Boolean(result.memory);
+  if (result.backgroundTask && result.started) {
+    return (
+      <div className="tool-step background-started">
+        <span className="step-marker"><GitBranchPlusIcon size={14} /></span>
+        <span className="step-label">{t("background.started")}</span>
+      </div>
+    );
+  }
   if (result.running) {
     const liveOut = `${result.stdout || ""}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
     const command = tool.args?.command || result.command || "";
@@ -5018,7 +5389,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
       </div>
     );
   }
-  const assistantActions = message.done !== false && (
+  const assistantActions = message.done !== false && !message.backgroundTaskId && (
     <div className="assistant-actions">
       <button type="button" className="assistant-action" title={t("action.copy")} onClick={copyMessage}>
         {copied ? <Check size={13} /> : <CopyIcon size={13} />}
@@ -5094,6 +5465,9 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
 
 const getToolIcon = (name = "") => {
   const lower = name.toLowerCase();
+  if (lower === "start_background_task" || lower === "get_background_task") {
+    return GitBranchPlusIcon;
+  }
   if (lower === "web_search") {
     return GlobeCheckIcon;
   }
@@ -5129,6 +5503,12 @@ const getToolLabel = (tool) => {
   const command = result.command || tool.args?.command;
   const path = tool.args?.path || tool.args?.file || result.path;
   const name = (tool.name || "").toLowerCase();
+  if (name === "start_background_task" && result.started) {
+    return t("background.started");
+  }
+  if (name === "get_background_task") {
+    return result.name || t("background.title");
+  }
   if (name === "datetime") {
     return t("toollabel.datetime");
   }

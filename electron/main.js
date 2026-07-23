@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { spawn as spawnPty } from "node-pty";
 import { mcpManager, extractCommandArg, extractTargetScope, scopeKey, collectArgStrings } from "./mcp.js";
+import { createBackgroundTaskManager } from "./background-tasks.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,6 +36,7 @@ const maxGoalRounds = 12;
 const defaultCommandTimeout = 30000;
 const maxCommandTimeout = 3600000;
 let mainWindow = null;
+let backgroundTaskManager = null;
 let commandCount = 0;
 let toolCallSeq = 0;
 const sanitizeMessages = (messages) => (messages || []).map(({ finishReason, ...rest }) => rest);
@@ -977,6 +979,40 @@ const toolSpecs = [
   {
     type: "function",
     function: {
+      name: "start_background_task",
+      description: "Start a long, non-interactive PowerShell command in the background and return immediately with a task ID. Use this ONLY for work expected to run for several minutes while you can leave the turn, such as a 40-minute Python data-processing script, a long index/build pipeline, rendering, training, or a batch analysis. Do NOT use it for normal file edits, ordinary builds/tests, short commands, interactive prompts, dev servers, GUIs, or work you should wait for with run_command. The task keeps running if the current model response is stopped. When it finishes, the app automatically gives you its ID, status, exit code and captured output in a new internal continuation. The command runs directly through powershell.exe inside the selected project.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Short human-readable task name shown in Background Tasks." },
+          category: { type: "string", description: "Short category such as Python, PowerShell, Build, Render, or Analysis." },
+          command: { type: "string", description: "PowerShell command that runs without user input and eventually exits." },
+          cwd: { type: "string", description: "Project-relative working directory. Defaults to the project root." },
+          expected_minutes: { type: "number", description: "Rough expected duration in minutes, for display only." },
+        },
+        required: ["name", "category", "command"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_background_task",
+      description: "Read the current status and captured output tail of a background task by ID. Use this only when you need to inspect a task before its automatic completion notification arrives.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+        },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "write_file",
       description: "Create a new file or overwrite an existing one with UTF-8 content. Path is project-relative. This actually writes the file.",
       parameters: {
@@ -1160,7 +1196,7 @@ const toolSpecs = [
   },
 ];
 
-const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "datetime", "list_memories"]);
+const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "datetime", "list_memories", "get_background_task"]);
 
 const localTimeZone = (() => {
   try {
@@ -1784,6 +1820,17 @@ const executeApprovedTool = async (projectPath, result, onProgress) => {
   if (result.addMcp) {
     return await upsertMcpServer(result.mcpAddName, result.mcpAddConfig);
   }
+  if (result.backgroundStart) {
+    if (!backgroundTaskManager) {
+      return { error: "Background task manager is unavailable." };
+    }
+    return await backgroundTaskManager.start({
+      projectPath,
+      chatId: result.chatId,
+      turnId: result.turnId,
+      ...result.backgroundStart,
+    });
+  }
   if (result.command) {
     return await runCommand(projectPath, result.command, result.cwd || ".", result.timeoutMs, (out, err) => {
       if (onProgress) {
@@ -2213,7 +2260,7 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
   if (name === "update_todos") {
     return { todos: (Array.isArray(args.todos) ? args.todos : []).slice(0, 20).map((item) => ({ text: String(item?.text || "").slice(0, 200), done: Boolean(item?.done) })) };
   }
-  if (planMode && (name === "write_file" || name === "replace_in_file" || name === "run_command")) {
+  if (planMode && (name === "write_file" || name === "replace_in_file" || name === "run_command" || name === "start_background_task")) {
     return {
       planBlocked: true,
       blockedTool: name,
@@ -2243,6 +2290,13 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
   }
   if (name === "get_file_outline") {
     return await getFileOutline(projectPath, args.path);
+  }
+  if (name === "get_background_task") {
+    const task = backgroundTaskManager?.get(args.id);
+    if (!task || task.chatId !== String(chatId || "")) {
+      return { error: "Background task not found in this chat." };
+    }
+    return { backgroundTask: true, ...task };
   }
   if (name === "web_search") {
     return await runWebSearch(settings, args, onProgress, turnSignal);
@@ -2349,6 +2403,56 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       if (onProgress) {
         onProgress({ command: args.command, stdout: out, stderr: err });
       }
+    });
+  }
+  if (name === "start_background_task") {
+    const command = String(args.command || "").trim();
+    const catastrophic = commandIsCatastrophic(command);
+    if (catastrophic) {
+      return { error: `Blocked: this background command would be ${catastrophic}. This is permanently blocked and cannot be approved in the app.` };
+    }
+    if (!backgroundTaskManager) {
+      return { error: "Background task manager is unavailable." };
+    }
+    const backgroundStart = {
+      name: String(args.name || "").trim(),
+      category: String(args.category || "").trim(),
+      command,
+      cwd: args.cwd || ".",
+      expectedMinutes: args.expected_minutes,
+    };
+    let allowed = false;
+    let classifierReason = "";
+    if (await prefixGrantAllows(command, projectPath)) {
+      allowed = true;
+    } else {
+      const gate = await commandStyleDecision(mode, command, settings, userContext, projectPath, visualContext);
+      if (gate.ok) {
+        allowed = true;
+      } else {
+        classifierReason = gate.classifierReason || "";
+      }
+    }
+    if (!allowed) {
+      const reason = classifierReason || (mode === "ask" ? "Ask mode: starting a background process needs approval" : "This background process needs your approval");
+      return {
+        permissionRequired: true,
+        backgroundStart,
+        command,
+        cwd: backgroundStart.cwd,
+        chatId,
+        turnId,
+        reason,
+        classifierBlocked: Boolean(classifierReason),
+        classifierReason,
+        stickyOptions: [{ type: "prefix", value: commandPrefixFor(command) }],
+      };
+    }
+    return await backgroundTaskManager.start({
+      projectPath,
+      chatId,
+      turnId,
+      ...backgroundStart,
     });
   }
   if (name === "add_mcp_server") {
@@ -3456,7 +3560,7 @@ const runAgentStream = async (payload, sender) => {
                   await recordGrant(projectPath, result, decision.stickyGrant);
                 } catch {}
               }
-              if (result.command || result.mcp) {
+              if ((result.command && !result.backgroundStart) || result.mcp) {
                 onProgress(result.mcp ? { mcp: true, server: result.mcpServer, tool: result.mcpTool, tier: result.mcpTier } : { command: result.command });
               }
               try {
@@ -4032,6 +4136,14 @@ ipcMain.handle("chats:save", async (_, chats) => {
   return true;
 });
 
+ipcMain.handle("background:list", (_, chatId) => backgroundTaskManager?.list(chatId) || []);
+ipcMain.handle("background:get", (_, id) => backgroundTaskManager?.get(id) || null);
+ipcMain.handle("background:cancel", async (_, id) => backgroundTaskManager ? await backgroundTaskManager.cancel(id) : { error: "Background task manager is unavailable." });
+ipcMain.handle("background:clear", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.clearFinished(chatId) : { removed: 0 });
+ipcMain.handle("background:deleteChat", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.deleteChat(chatId) : { removed: 0 });
+ipcMain.handle("background:claim", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.claimPending(chatId) : null);
+ipcMain.handle("background:settleNotification", async (_, id, delivered) => backgroundTaskManager ? await backgroundTaskManager.settleNotification(id, Boolean(delivered)) : false);
+
 ipcMain.handle("models:get", async () => await modelCatalog());
 
 ipcMain.handle("image:save", async (_, payload) => {
@@ -4305,15 +4417,26 @@ app.on("before-quit", () => {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
-  ensureWorkspace().catch(() => {});
+  await ensureWorkspace().catch(() => {});
+  backgroundTaskManager = createBackgroundTaskManager({
+    dataFile: getUserFile("background-tasks.json"),
+    resolveTarget: resolveInsideProject,
+    emit: (event) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("background:event", event);
+      }
+    },
+  });
+  await backgroundTaskManager.initialize().catch(() => {});
   sweepOrphanImages().catch(() => {});
-  createWindow();
+  await createWindow();
   try {
     const settings = await readSettings();
     mcpManager.syncFromSettings(settings.mcpServers).catch(() => {});
   } catch {}
 });
 app.on("before-quit", () => {
+  backgroundTaskManager?.shutdown();
   mcpManager.shutdownAll().catch(() => {});
 });
 app.on("window-all-closed", () => {
