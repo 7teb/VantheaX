@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -277,6 +277,20 @@ const STRINGS = {
     "background.canceled": "Canceled",
     "background.interrupted": "Interrupted",
     "background.process": "Process",
+    "agent.deploying": "Deploying agent",
+    "agent.deployed": "Deployed agent",
+    "agent.failed": "Agent failed",
+    "agent.canceled": "Agent canceled",
+    "agent.interrupted": "Agent interrupted",
+    "agent.contextLimit": "Agent context limit reached",
+    "agent.maxRounds": "Agent round limit reached",
+    "agent.viewTranscript": "View Transcript",
+    "agent.transcript": "Agent transcript",
+    "agent.prompt": "Prompt",
+    "agent.back": "Back to background tasks",
+    "agent.noTranscript": "No transcript entries yet",
+    "agent.waitingApproval": "Waiting for approval",
+    "approval.agentRequest": "{name} requests permission",
     "fc.undo": "Undo",
     "fc.review": "Review",
     "fc.reverted": "Reverted",
@@ -623,6 +637,20 @@ const STRINGS = {
     "background.canceled": "Abgebrochen",
     "background.interrupted": "Unterbrochen",
     "background.process": "Prozess",
+    "agent.deploying": "Agent wird deployed",
+    "agent.deployed": "Agent deployed",
+    "agent.failed": "Agent fehlgeschlagen",
+    "agent.canceled": "Agent abgebrochen",
+    "agent.interrupted": "Agent unterbrochen",
+    "agent.contextLimit": "Agent-Context-Limit erreicht",
+    "agent.maxRounds": "Agent-Rundenlimit erreicht",
+    "agent.viewTranscript": "Transcript anzeigen",
+    "agent.transcript": "Agent-Transcript",
+    "agent.prompt": "Prompt",
+    "agent.back": "Zurück zu Background Tasks",
+    "agent.noTranscript": "Noch keine Transcript-Einträge",
+    "agent.waitingApproval": "Wartet auf Freigabe",
+    "approval.agentRequest": "{name} benötigt eine Freigabe",
     "fc.undo": "Rückgängig machen",
     "fc.review": "Überprüfen",
     "fc.reverted": "Rückgängig gemacht",
@@ -1467,7 +1495,7 @@ const backgroundTaskStore = (() => {
         return;
       }
       if (event.type === "cleared") {
-        setChatTasks(chatId, (cache.get(chatId) || []).filter((task) => task.status === "running"));
+        api.listBackgroundTasks(chatId).then((tasks) => setChatTasks(chatId, tasks)).catch(() => {});
         return;
       }
       const task = event.task;
@@ -1886,7 +1914,8 @@ const App = () => {
   const [goalText, setGoalText] = useState("");
   const [todos, setTodos] = useState([]);
   const [goalDone, setGoalDone] = useState(false);
-  const [pendingPermission, setPendingPermission] = useState(null);
+  const [permissionQueue, setPermissionQueue] = useState([]);
+  const pendingPermission = permissionQueue[0] || null;
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(null);
@@ -1900,6 +1929,22 @@ const App = () => {
   const messagesRef = useRef(null);
   const compactingRef = useRef(false);
   const pacerRef = useRef(null);
+
+  const enqueuePermission = (entry) => {
+    if (!entry?.callId) {
+      return;
+    }
+    setPermissionQueue((current) => {
+      const at = current.findIndex((item) => item.callId === entry.callId);
+      return at >= 0
+        ? current.map((item, index) => index === at ? entry : item)
+        : [...current, entry];
+    });
+  };
+
+  const removePermission = (callId) => {
+    setPermissionQueue((current) => current.filter((item) => item.callId !== callId));
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -1927,6 +1972,16 @@ const App = () => {
   useEffect(() => api.onBackgroundEvent((event) => {
     backgroundTaskStore.applyEvent(event);
     setBackgroundWake((value) => value + 1);
+  }), []);
+
+  useEffect(() => api.onAgentPermission((event) => {
+    if (event?.type === "required" && event.callId && event.tool) {
+      enqueuePermission({ callId: event.callId, tool: event.tool, agentId: event.agentId, runId: event.runId });
+      return;
+    }
+    if (event?.type === "resolved" && event.callId) {
+      removePermission(event.callId);
+    }
   }), []);
 
   useEffect(() => {
@@ -2301,7 +2356,7 @@ const App = () => {
       activeRequestRef.current = null;
     }
     activeMsgRef.current = null;
-    setPendingPermission(null);
+    setPermissionQueue([]);
     setBusy(false);
   };
 
@@ -2986,9 +3041,9 @@ const App = () => {
           return { ...message, tools, segments, liveTool: null };
         }), updatedAt: new Date().toISOString() } : item));
         if (event.tool?.result?.permissionRequired) {
-          setPendingPermission({ callId: event.tool.id, tool: event.tool });
+          enqueuePermission({ callId: event.tool.id, tool: event.tool });
         } else if (event.tool?.id) {
-          setPendingPermission((prev) => (prev && prev.callId === event.tool.id ? null : prev));
+          removePermission(event.tool.id);
         }
       }
     };
@@ -3132,7 +3187,7 @@ const App = () => {
     }
     activeRequestRef.current = null;
     activeMsgRef.current = null;
-    setPendingPermission(null);
+    setPermissionQueue([]);
     setBusy(false);
   };
 
@@ -3169,7 +3224,7 @@ const App = () => {
     if (!callId) {
       return;
     }
-    setPendingPermission(null);
+    removePermission(callId);
     setStatus(decision.approved ? t("status.approved") : t("status.denied"));
     try {
       await api.resolvePermission(callId, decision);
@@ -4419,7 +4474,20 @@ const formatTaskDuration = (task) => {
   return `${minutes}m ${rest}s`;
 };
 
-const BackgroundTaskCard = ({ task }) => {
+const agentStatusLabel = (status) => {
+  if (status === "completed") {
+    return t("agent.deployed");
+  }
+  if (status === "context_limit") {
+    return t("agent.contextLimit");
+  }
+  if (status === "max_rounds") {
+    return t("agent.maxRounds");
+  }
+  return t(`agent.${status}`);
+};
+
+const BackgroundTaskCard = ({ task, onTranscript }) => {
   const [, refresh] = useState(0);
   useEffect(() => {
     if (task.status !== "running") {
@@ -4428,19 +4496,29 @@ const BackgroundTaskCard = ({ task }) => {
     const timer = setInterval(() => refresh((value) => value + 1), 1000);
     return () => clearInterval(timer);
   }, [task.status]);
-  const status = task.status === "running" ? t("background.runningStatus") : t(`background.${task.status}`);
+  const isAgent = task.kind === "agent";
+  const status = isAgent
+    ? (task.status === "running" ? t("background.runningStatus") : agentStatusLabel(task.status))
+    : (task.status === "running" ? t("background.runningStatus") : t(`background.${task.status}`));
   return (
-    <article className={`background-task-card is-${task.status}`}>
+    <article className={`background-task-card is-${task.status}${isAgent ? " is-agent" : ""}`}>
       <div className="background-task-copy">
         <div className="background-task-name">{task.name}</div>
+        {isAgent && task.description && <div className="background-task-description">{task.description}</div>}
         <div className="background-task-meta">
           <span>{task.category || t("background.process")}</span>
+          {isAgent && task.model && <><span className="background-task-dot">·</span><span className="background-task-model">{task.model}</span></>}
           <span className="background-task-dot">·</span>
           <span className="background-task-status">{status}</span>
           <span className="background-task-dot">·</span>
           <span>{formatTaskDuration(task)}</span>
         </div>
         <div className="background-task-id">{task.id}</div>
+        {isAgent && (
+          <button type="button" className="background-transcript-button" onClick={() => onTranscript(task)}>
+            {t("agent.viewTranscript")}
+          </button>
+        )}
       </div>
       {task.status === "running" && (
         <button className="background-task-cancel" title={t("background.cancel")} onClick={() => api.cancelBackgroundTask(task.id)}>
@@ -4451,11 +4529,154 @@ const BackgroundTaskCard = ({ task }) => {
   );
 };
 
+const AgentTranscriptEntry = ({ entry }) => {
+  if (entry.type === "prompt") {
+    return (
+      <section className="agent-transcript-prompt">
+        <div className="agent-transcript-label">{t("agent.prompt")}</div>
+        <div className="markdown"><MarkdownMessage content={entry.text || ""} /></div>
+      </section>
+    );
+  }
+  if (entry.type === "text") {
+    return entry.text ? <div className="agent-transcript-text markdown"><MarkdownMessage content={entry.text} /></div> : null;
+  }
+  if (entry.type === "system") {
+    return <div className="agent-transcript-system"><LoaderIcon size={12} />{entry.text}</div>;
+  }
+  if (entry.type === "error") {
+    return <div className="agent-transcript-error">{entry.text}</div>;
+  }
+  if (entry.type === "tool") {
+    return (
+      <details className="agent-transcript-tool" open={entry.status === "running"}>
+        <summary>
+          <Terminal size={13} />
+          <span>{entry.name}</span>
+          {entry.status === "running" && <LoaderIcon size={12} className="running-spinner" />}
+        </summary>
+        {entry.args && <pre>{entry.args}</pre>}
+      </details>
+    );
+  }
+  if (entry.type === "tool_result") {
+    return (
+      <details className={`agent-transcript-result is-${entry.status || "completed"}`}>
+        <summary>
+          <CircleCheck size={13} />
+          <span>{entry.name}</span>
+          <small>{entry.status}</small>
+        </summary>
+        {entry.text && <pre>{entry.text}</pre>}
+      </details>
+    );
+  }
+  if (entry.type === "progress") {
+    return entry.text ? <pre className="agent-transcript-progress">{entry.text}</pre> : null;
+  }
+  return null;
+};
+
+const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
+  const [data, setData] = useState(null);
+  const [runId, setRunId] = useState(task.runId || "");
+  const refreshRef = useRef(null);
+  const bodyRef = useRef(null);
+  const stickToBottomRef = useRef(true);
+  const load = useCallback(async (requestedRunId = runId) => {
+    const next = await api.getAgentTranscript(task.agentId || task.id, requestedRunId);
+    if (next) {
+      setData(next);
+      setRunId(next.run?.id || requestedRunId);
+    }
+  }, [runId, task.agentId, task.id]);
+  useEffect(() => {
+    load(task.runId || "");
+  }, [task.agentId, task.id, task.runId]);
+  useEffect(() => {
+    const unsubscribe = api.onAgentEvent?.((event) => {
+      if (event?.agentId !== (task.agentId || task.id)) {
+        return;
+      }
+      if (event.runId && runId && event.runId !== runId) {
+        return;
+      }
+      clearTimeout(refreshRef.current);
+      refreshRef.current = setTimeout(() => load(runId), 60);
+    });
+    return () => {
+      clearTimeout(refreshRef.current);
+      unsubscribe?.();
+    };
+  }, [load, runId, task.agentId, task.id]);
+  const entries = data?.run?.transcript || [];
+  const lastEntry = entries[entries.length - 1];
+  useLayoutEffect(() => {
+    if (stickToBottomRef.current && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [entries.length, lastEntry?.text?.length]);
+  return (
+    <aside className="background-panel agent-transcript-panel">
+      <div className="background-head agent-transcript-head">
+        <button type="button" className="agent-transcript-back" title={t("agent.back")} onClick={onBack}>
+          <ChevronLeft size={16} />
+        </button>
+        <span className="background-heading">{data?.agent?.name || task.name}</span>
+        <div className="terminal-actions">
+          <button className="terminal-action" title={full ? t("background.exitFullscreen") : t("background.fullscreen")} onClick={onToggleFull}>
+            {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button className="terminal-action terminal-action-close" title={t("background.close")} onClick={onClose}><X size={16} /></button>
+        </div>
+      </div>
+      <div className="agent-transcript-meta">
+        <span>{data?.agent?.model || task.model}</span>
+        <span>{task.agentId || task.id}</span>
+        {(data?.runs?.length || 0) > 1 && (
+          <select value={runId} onChange={(event) => {
+            stickToBottomRef.current = true;
+            load(event.target.value);
+          }}>
+            {data.runs.map((run, index) => <option key={run.id} value={run.id}>Run {index + 1} · {run.status}</option>)}
+          </select>
+        )}
+      </div>
+      <div
+        ref={bodyRef}
+        className="agent-transcript-body"
+        onScroll={(event) => {
+          const node = event.currentTarget;
+          stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+        }}
+      >
+        {entries.map((entry) => <AgentTranscriptEntry key={entry.id} entry={entry} />)}
+        {!entries.length && <div className="background-empty">{t("agent.noTranscript")}</div>}
+      </div>
+    </aside>
+  );
+};
+
 const BackgroundTasksPanel = ({ full, onToggleFull, onClose }) => {
   const tasks = useBackgroundTasks();
   const [finishedOpen, setFinishedOpen] = useState(false);
+  const [transcriptTask, setTranscriptTask] = useState(null);
   const chatId = tasks[0]?.chatId || "";
-  useEffect(() => setFinishedOpen(false), [chatId]);
+  useEffect(() => {
+    setFinishedOpen(false);
+    setTranscriptTask(null);
+  }, [chatId]);
+  if (transcriptTask) {
+    return (
+      <AgentTranscriptView
+        task={transcriptTask}
+        full={full}
+        onToggleFull={onToggleFull}
+        onBack={() => setTranscriptTask(null)}
+        onClose={onClose}
+      />
+    );
+  }
   const running = tasks.filter((task) => task.status === "running");
   const finished = tasks.filter((task) => task.status !== "running");
   return (
@@ -4474,7 +4695,7 @@ const BackgroundTasksPanel = ({ full, onToggleFull, onClose }) => {
           <section className="background-section">
             <div className="background-section-label">{t("background.running", { n: running.length })}</div>
             <div className="background-task-list">
-              {running.map((task) => <BackgroundTaskCard key={task.id} task={task} />)}
+              {running.map((task) => <BackgroundTaskCard key={task.id} task={task} onTranscript={setTranscriptTask} />)}
             </div>
           </section>
         )}
@@ -4488,7 +4709,7 @@ const BackgroundTasksPanel = ({ full, onToggleFull, onClose }) => {
           </div>
           <div className={finishedOpen ? "background-finished-list is-open" : "background-finished-list"}>
             <div className="background-finished-inner">
-              {finished.map((task) => <BackgroundTaskCard key={task.id} task={task} />)}
+              {finished.map((task) => <BackgroundTaskCard key={task.id} task={task} onTranscript={setTranscriptTask} />)}
             </div>
           </div>
         </section>
@@ -4930,6 +5151,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
   const isWrite = Boolean(result.write);
   const isAddMcp = Boolean(result.addMcp);
   const isMemory = Boolean(result.memory);
+  const isAgentPermission = Boolean(result.agentName);
   const command = result.command || tool.args?.command || "";
   const tier = result.mcpTier || result.tier || "";
   const addLine = isAddMcp ? `${result.mcpAddName}  →  ${result.mcpAddConfig?.command || ""} ${(result.mcpAddConfig?.args || []).join(" ")}`.trim() : "";
@@ -4970,7 +5192,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
     }
     setSent(true);
     if (choice === "deny") {
-      onResolve({ approved: false, denyFeedback: feedback.trim() });
+      onResolve({ approved: false, denyFeedback: isAgentPermission ? "" : feedback.trim() });
       return;
     }
     if (choice === "once") {
@@ -4983,6 +5205,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
   const question = isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMemory ? t(result.memoryAction === "delete" ? "approval.questionForget" : "approval.questionRemember") : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand"))));
   return (
     <div className="approval-form">
+      {result.agentName && <div className="approval-agent">{t("approval.agentRequest", { name: result.agentName })}</div>}
       <div className="approval-question">
         {isAddMcp ? <Plug size={15} /> : <ShieldCheck size={15} />}
         <span>{question}</span>
@@ -5008,7 +5231,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
           <input type="radio" name="approval" checked={choice === "deny"} onChange={() => setChoice("deny")} />
           <span>{t("approval.no")}</span>
         </label>
-        {choice === "deny" && (
+        {choice === "deny" && !isAgentPermission && (
           <textarea className="approval-feedback" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder={t("approval.feedbackPlaceholder")} autoFocus />
         )}
       </div>
@@ -5026,6 +5249,18 @@ const ToolStep = ({ tool }) => {
   const Icon = getToolIcon(tool.name);
   const label = getToolLabel(tool);
   const isMemory = Boolean(result.memory);
+  if (result.agent) {
+    const status = result.running || result.status === "running"
+      ? t("agent.deploying")
+      : (result.status === "completed" ? t("agent.deployed") : agentStatusLabel(result.status || "failed"));
+    return (
+      <div className={`tool-step agent-deploy is-${result.status || "running"}`}>
+        <span className="step-marker"><GitBranchPlusIcon size={14} /></span>
+        <span className="step-label">{status}</span>
+        {(result.running || result.status === "running") && <LoaderIcon size={12} className="running-spinner" />}
+      </div>
+    );
+  }
   if (result.backgroundTask && result.started) {
     return (
       <div className="tool-step background-started">
@@ -5465,7 +5700,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
 
 const getToolIcon = (name = "") => {
   const lower = name.toLowerCase();
-  if (lower === "start_background_task" || lower === "get_background_task") {
+  if (lower === "start_background_task" || lower === "get_background_task" || lower === "deploy_agent" || lower === "continue_agent") {
     return GitBranchPlusIcon;
   }
   if (lower === "web_search") {
@@ -5503,6 +5738,11 @@ const getToolLabel = (tool) => {
   const command = result.command || tool.args?.command;
   const path = tool.args?.path || tool.args?.file || result.path;
   const name = (tool.name || "").toLowerCase();
+  if ((name === "deploy_agent" || name === "continue_agent") && result.agent) {
+    return result.running || result.status === "running"
+      ? t("agent.deploying")
+      : (result.status === "completed" ? t("agent.deployed") : agentStatusLabel(result.status || "failed"));
+  }
   if (name === "start_background_task" && result.started) {
     return t("background.started");
   }
@@ -5575,6 +5815,15 @@ const ToolTimeline = ({ tools }) => (
         const result = tool.result || {};
         const Icon = getToolIcon(tool.name);
         const label = getToolLabel(tool);
+        if (result.agent) {
+          return (
+            <div key={tool.id || index} className={`tool-card agent-deploy is-${result.status || "running"}`}>
+              <span className="timeline-marker"><GitBranchPlusIcon size={14} /></span>
+              <span className="tool-title">{label}</span>
+              {(result.running || result.status === "running") && <LoaderIcon size={12} className="running-spinner" />}
+            </div>
+          );
+        }
         return (
           <details key={tool.id || index} className={needsPermission ? "tool-card permission" : "tool-card"}>
             <summary>

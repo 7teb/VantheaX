@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { spawn as spawnPty } from "node-pty";
 import { mcpManager, extractCommandArg, extractTargetScope, scopeKey, collectArgStrings } from "./mcp.js";
 import { createBackgroundTaskManager } from "./background-tasks.js";
+import { createAgentSessionManager } from "./agent-sessions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,8 +36,12 @@ const toolResultMaxTokens = 25000;
 const maxGoalRounds = 12;
 const defaultCommandTimeout = 30000;
 const maxCommandTimeout = 3600000;
+const agentContextThreshold = Math.floor(512000 * 0.8);
+const agentContextEmergency = Math.floor(512000 * 0.92);
+const agentRuntimeLimit = 2 * 60 * 60 * 1000;
 let mainWindow = null;
 let backgroundTaskManager = null;
+let agentSessionManager = null;
 let commandCount = 0;
 let toolCallSeq = 0;
 const sanitizeMessages = (messages) => (messages || []).map(({ finishReason, ...rest }) => rest);
@@ -836,14 +841,18 @@ const getFileOutline = async (projectPath, relativePath) => {
   return { path: file.path, outline: outline.slice(0, 120) };
 };
 
-const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData) => {
+const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData, budget = null) => {
   const catastrophic = commandIsCatastrophic(command);
   if (catastrophic) {
     throw new Error(`Catastrophic command permanently blocked: ${catastrophic}. This cannot be overridden in the app, run it yourself in a real terminal if you truly intend it.`);
   }
   const { root, target } = await resolveInsideProject(projectPath, cwd || ".");
-  commandCount += 1;
-  if (commandCount > maxCommands) {
+  if (budget) {
+    budget.count = Number(budget.count || 0) + 1;
+  } else {
+    commandCount += 1;
+  }
+  if ((budget ? budget.count : commandCount) > maxCommands) {
     throw new Error("Command budget exceeded");
   }
   const timeout = Math.min(maxCommandTimeout, Math.max(1000, Number(timeoutMs) || defaultCommandTimeout));
@@ -1006,6 +1015,42 @@ const toolSpecs = [
           id: { type: "string" },
         },
         required: ["id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "deploy_agent",
+      description: "Deploy one focused sub-agent and wait for its report. Use this ONLY when delegation has a real benefit: the user explicitly asks for agents, the task contains multiple independent investigations that should run in parallel, a large read-heavy exploration would pollute your own context, or a substantial bounded implementation can be owned independently. NEVER deploy an agent for a simple lookup, a small edit, a task you can finish in a few normal tool calls, or merely to avoid doing the work yourself. The agent has a separate persistent context, uses the selected chat permission mode, cannot speak to the user, cannot deploy agents, and returns one technical report. Multiple deploy_agent calls in the same response run in parallel. The call stays active until the agent finishes or is canceled.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Short specific agent name shown in Background Tasks." },
+          description: { type: "string", description: "One-line description of the responsibility assigned to this agent." },
+          prompt: { type: "string", description: "Complete standalone task prompt: exact goal, relevant paths and findings, expected tools or approach, constraints, and what the final report must contain." },
+          model: { type: "string", description: "Exact model id from the app model catalog. Any currently available UI model is allowed." },
+          profile: { type: "string", enum: ["explore", "worker"], description: "explore is read-only. worker can also edit files and run commands through the same permission and safety checks as you." },
+        },
+        required: ["name", "description", "prompt", "model", "profile"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "continue_agent",
+      description: "Run an existing agent again with its preserved context and wait for the new report. Use the exact agent_id previously returned by deploy_agent. Use this only when the same specialist genuinely benefits from its earlier findings; never use it for a simple task. The agent keeps its name, description and tool profile, uses the current chat permission mode for this run, and cannot speak to the user or deploy other agents.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_id: { type: "string", description: "Stable agent context id returned by deploy_agent." },
+          prompt: { type: "string", description: "The next complete instruction for this agent." },
+          model: { type: "string", description: "Optional exact UI model id. If omitted, the agent keeps its previous model." },
+        },
+        required: ["agent_id", "prompt"],
         additionalProperties: false,
       },
     },
@@ -1196,7 +1241,9 @@ const toolSpecs = [
   },
 ];
 
-const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "datetime", "list_memories", "get_background_task"]);
+const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "datetime", "list_memories", "get_background_task", "deploy_agent", "continue_agent"]);
+const agentExploreToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "web_search"]);
+const agentWorkerToolNames = new Set([...agentExploreToolNames, "write_file", "replace_in_file", "run_command"]);
 
 const localTimeZone = (() => {
   try {
@@ -1227,6 +1274,18 @@ const datetimeFunctionTool = {
 };
 
 const toolsForContext = (payload) => {
+  if (payload.agentSession) {
+    const allowed = payload.agentSession.profile === "worker" ? agentWorkerToolNames : agentExploreToolNames;
+    const specs = toolSpecs.filter((tool) => {
+      const name = tool.function.name;
+      if (!allowed.has(name)) {
+        return false;
+      }
+      return name !== "web_search" || Boolean(payload.webSearchEnabled);
+    });
+    specs.push(datetimeFunctionTool);
+    return specs;
+  }
   const base = toolSpecs.filter((tool) => {
     const name = tool.function.name;
     if (name === "web_search") {
@@ -1807,7 +1866,7 @@ const resolvePermission = (callId, payload) => {
   return true;
 };
 
-const executeApprovedTool = async (projectPath, result, onProgress) => {
+const executeApprovedTool = async (projectPath, result, onProgress, runtime = {}) => {
   if (result.write && result.pendingWriteId) {
     return await applyPendingWrite(result.pendingWriteId);
   }
@@ -1836,7 +1895,7 @@ const executeApprovedTool = async (projectPath, result, onProgress) => {
       if (onProgress) {
         onProgress({ command: result.command, stdout: out, stderr: err });
       }
-    });
+    }, runtime.commandBudget);
   }
   return { error: "Nothing to execute after approval" };
 };
@@ -2248,9 +2307,44 @@ const runWebSearch = async (settings, args, onProgress, turnSignal) => {
   }
 };
 
-const executeTool = async (projectPath, index, toolCall, mode, settings, planMode, userContext = [], chatId, onProgress, turnId, visualContext = [], turnSignal = null) => {
+const executeTool = async (projectPath, index, toolCall, mode, settings, planMode, userContext = [], chatId, onProgress, turnId, visualContext = [], turnSignal = null, runtime = {}) => {
   const name = toolCall.function.name;
   const args = parseToolArguments(toolCall.function.arguments);
+  if (runtime.depth > 0) {
+    const allowed = runtime.profile === "worker" ? agentWorkerToolNames : agentExploreToolNames;
+    if (name !== "datetime" && !allowed.has(name)) {
+      return { error: "This tool is not available to sub-agents." };
+    }
+  }
+  if (name === "deploy_agent" || name === "continue_agent") {
+    if (runtime.depth > 0) {
+      return { error: "Sub-agents cannot deploy or continue other agents." };
+    }
+    const budget = runtime.deployments;
+    if (!budget || budget.count >= 8) {
+      return { error: "At most 8 agent runs can be started in one main turn." };
+    }
+    budget.count += 1;
+    if (planMode && name === "deploy_agent" && args.profile !== "explore") {
+      return { error: "Plan mode only allows read-only explore agents." };
+    }
+    return await runDelegatedAgent({
+      action: name === "continue_agent" ? "continue" : "deploy",
+      args,
+      projectPath,
+      index,
+      mode,
+      settings,
+      planMode,
+      userContext,
+      visualContext,
+      chatId,
+      turnId,
+      parentSignal: turnSignal,
+      onProgress,
+      payload: runtime.payload || {},
+    });
+  }
   if (name === "present_plan") {
     return { plan: { summary: args.summary || "", keyChanges: args.key_changes || [], testPlan: args.test_plan || [], assumptions: args.assumptions || [], filesToChange: args.files_to_change || [], riskLevel: args.risk_level || "", requiresCommands: Boolean(args.requires_commands) } };
   }
@@ -2403,7 +2497,7 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       if (onProgress) {
         onProgress({ command: args.command, stdout: out, stderr: err });
       }
-    });
+    }, runtime.commandBudget);
   }
   if (name === "start_background_task") {
     const command = String(args.command || "").trim();
@@ -2619,6 +2713,12 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     "In Auto permission mode a separate overseer model (a safety classifier) reviews every command that is not plain read-only before it runs: commands it considers safe for the user's request run automatically, commands it considers risky are paused and the user is asked to approve them first. So in Auto, do not assume a non-read-only command always runs silently, and keep each command clearly scoped to what the user actually asked so the overseer can see it is legitimate. The overseer judges only run_command, never your file reads or edits, and the few catastrophic system-destroying commands stay hard-blocked in every mode no matter what it says.",
   ];
   lines.push(personalityTone[payload.personality] || personalityTone.pragmatic);
+  if (!payload.agentSession) {
+    lines.push("You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Multiple consecutive deploy_agent calls run in parallel. Each call waits for its agent to finish, then returns only the final report. Sub-agents cannot talk to the user or deploy agents themselves.");
+    if (Array.isArray(payload.agentModels) && payload.agentModels.length) {
+      lines.push(`Available agent models in the current UI: ${payload.agentModels.join(", ")}.`);
+    }
+  }
   if (payload.planMode) {
     lines.push("PLAN MODE IS ON. You may ONLY read and inspect the project (read_file, list_files, grep_files, get_file_outline). Do NOT write files or run commands. Once you understand the task, you MUST present your plan by calling the present_plan tool, do NOT write the plan as a normal text message. The present_plan tool call is the ONLY way the user can review and approve your plan. Do not write any code yet.");
   }
@@ -3350,8 +3450,429 @@ const collectWrittenFiles = (toolEvents) => {
     if ((t.name === "write_file" || t.name === "replace_in_file") && t.result && t.result.written && t.result.path) {
       out.push(t.result.path);
     }
+    if (t.result?.agent && Array.isArray(t.result.writtenFiles)) {
+      out.push(...t.result.writtenFiles);
+    }
   }
-  return out;
+  return [...new Set(out)];
+};
+
+const capTranscriptText = (value, max = 100000) => {
+  const text = String(value || "");
+  if (text.length <= max) {
+    return text;
+  }
+  return `${text.slice(0, max)}\n[transcript entry truncated: ${text.length - max} chars]`;
+};
+
+const buildAgentSystemPrompt = (index, mode, payload, session) => {
+  const basePayload = {
+    ...payload,
+    personality: "pragmatic",
+    planMode: false,
+    goalMode: false,
+    goal: "",
+    summary: "",
+    memoryText: "",
+    agentSession: { id: session.id, profile: session.profile },
+  };
+  const base = buildSystemPrompt(index, mode, basePayload, []);
+  const role = [
+    "SUB-AGENT ROLE, this final block overrides any main-assistant workflow instructions above that conflict with it.",
+    `You are the focused background sub-agent named "${session.name}" with persistent id ${session.id}. You are not the main VantheaX agent and there is no interactive user in your conversation.`,
+    "Execute only the delegated task in the latest user message. Do not chat with the main agent like a companion, do not address the end user, do not ask questions, and do not wait for conversational input. Investigate missing details with your tools. If genuinely blocked, document the exact blocker in your final report.",
+    `Your tool profile is ${session.profile}. ${session.profile === "worker" ? "You may read, edit and run commands through the same permission and safety checks as the main agent." : "You are strictly read-only and may not edit files or run commands."}`,
+    "You cannot deploy or continue agents, use MCP, save memories, update the main task list, present plans, submit goals, or start background tasks. The earlier task-list and narrator requirements do not apply to you.",
+    "Write short technical status sentences before meaningful tool calls so the read-only transcript clearly shows what you are doing. Never expose hidden reasoning. Keep status text factual and compact.",
+    "Do not suggest or request another agent. Work until the delegated task is complete, blocked, canceled, or reaches a hard limit.",
+    "Your last assistant message is the only report returned to the main agent. Make it self-contained and technical: findings, exact paths and identifiers, changes made, tests run, remaining issues, and blockers. Do not add greetings, offers, follow-up questions, or conversational filler.",
+  ];
+  return `${base}\n\n${role.join("\n\n")}`;
+};
+
+const recentAgentMessages = (messages, count = 14) => {
+  let start = Math.max(1, messages.length - count);
+  while (start > 1 && messages[start]?.role === "tool") {
+    start -= 1;
+  }
+  return messages.slice(start);
+};
+
+const summarizeAgentContext = async ({ settings, modelEntry, payload, session, messages, signal }) => {
+  const prior = session.summary ? `PRIOR AGENT SUMMARY:\n${session.summary}\n\n` : "";
+  const digest = buildConversationDigest(messages, 320000);
+  const prompt = [
+    `ORIGINAL DELEGATED TASK:\n${session.initialPrompt}`,
+    prior,
+    "CONTEXT TO COMPRESS:",
+    digest,
+    "Return a compact technical checkpoint with these headings when relevant: OBJECTIVE, FINDINGS, DECISIONS, FILES READ, FILES CHANGED, COMMANDS AND TESTS, OPEN WORK, BLOCKERS. Preserve exact paths, symbols, values and IDs. Do not invent facts or include long raw output.",
+  ].join("\n\n");
+  const summaryPayload = { ...payload, model: session.model, effort: session.effort };
+  const body = buildRequestBody(modelEntry, settings, summaryPayload, [
+    { role: "system", content: "Compress a sub-agent's working context into a precise checkpoint. Output only the checkpoint." },
+    { role: "user", content: prompt },
+  ], []);
+  const target = modelEntry?.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
+  const response = await streamOpenRouter(settings, body, () => {}, signal, target);
+  const summary = String(response.content || "").trim().slice(0, 60000);
+  if (!summary) {
+    throw new Error("Agent context compression returned an empty checkpoint.");
+  }
+  return {
+    summary,
+    messages: [
+      messages[0],
+      {
+        role: "user",
+        content: `[AGENT CONTEXT CHECKPOINT]\n\nOriginal task:\n${session.initialPrompt}\n\nCompressed state:\n${summary}`,
+      },
+      ...recentAgentMessages(messages),
+    ],
+  };
+};
+
+const emitAgentPermission = (event) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("agent:permission", event);
+  }
+};
+
+const runDelegatedAgent = async ({
+  action,
+  args,
+  projectPath,
+  index,
+  mode,
+  settings,
+  planMode,
+  userContext,
+  visualContext,
+  chatId,
+  turnId,
+  parentSignal,
+  onProgress,
+  payload,
+}) => {
+  if (!agentSessionManager) {
+    return { error: "Agent session manager is unavailable." };
+  }
+  const existing = action === "continue" ? agentSessionManager.get(args.agent_id) : null;
+  if (action === "continue" && !existing) {
+    return { error: "Agent context not found in this chat." };
+  }
+  const profile = action === "continue" ? existing.profile : (args.profile === "worker" ? "worker" : "explore");
+  if (planMode && profile !== "explore") {
+    return { error: "Plan mode only allows read-only explore agents." };
+  }
+  const modelId = String(args.model || existing?.model || payload.model || "");
+  const modelEntry = await catalogEntry(modelId);
+  if (!modelEntry) {
+    return { error: `Unknown agent model: ${modelId || "empty"}. Use an exact model id from the UI catalog.` };
+  }
+  if (modelEntry.apiProvider === "nvidia" && !settings.nvidia?.enabled) {
+    return { error: "The selected NVIDIA agent model is disabled in Settings." };
+  }
+  const effort = (modelEntry.efforts || []).includes(payload.effort)
+    ? payload.effort
+    : ((modelEntry.efforts || []).includes(existing?.effort) ? existing.effort : modelEntry.defaultEffort);
+  const started = await agentSessionManager.begin({
+    agentId: action === "continue" ? args.agent_id : "",
+    chatId,
+    turnId,
+    projectPath,
+    name: args.name,
+    description: args.description,
+    model: modelId,
+    effort,
+    profile,
+    prompt: args.prompt,
+  });
+  if (started.error) {
+    return started;
+  }
+  const { session, run } = started;
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort();
+  parentSignal?.addEventListener?.("abort", onParentAbort, { once: true });
+  agentSessionManager.attachController(session.id, run.id, controller);
+  onProgress?.({
+    agent: true,
+    status: "running",
+    agentId: session.id,
+    runId: run.id,
+    name: session.name,
+    model: session.model,
+  });
+  const agentPayload = {
+    ...payload,
+    model: session.model,
+    effort: session.effort,
+    mode,
+    planMode: false,
+    goalMode: false,
+    goal: "",
+    summary: "",
+    memoryText: "",
+    agentSession: { id: session.id, profile: session.profile },
+  };
+  let messages = [
+    { role: "system", content: buildAgentSystemPrompt(index, mode, agentPayload, session) },
+    ...(Array.isArray(session.context) ? session.context : []),
+    { role: "user", content: String(args.prompt || "") },
+  ];
+  let summary = session.summary || "";
+  let terminalText = "";
+  let stopReason = "done";
+  let status = "completed";
+  const toolEvents = [];
+  const startedAt = Date.now();
+  const agentRuntime = {
+    depth: 1,
+    profile: session.profile,
+    payload: agentPayload,
+    commandBudget: { count: 0 },
+  };
+  try {
+    for (let round = 0; round < maxToolRounds; round += 1) {
+      if (controller.signal.aborted) {
+        status = "canceled";
+        stopReason = parentSignal?.aborted ? "parent_stopped" : "user_canceled";
+        break;
+      }
+      if (Date.now() - startedAt >= agentRuntimeLimit) {
+        status = "interrupted";
+        stopReason = "runtime_limit";
+        break;
+      }
+      let specs = toolsForContext(agentPayload);
+      let tokens = estimateTokens(JSON.stringify(sanitizeMessages(messages))) + estimateTokens(JSON.stringify(specs));
+      if (tokens >= agentContextThreshold) {
+        try {
+          const compacted = await summarizeAgentContext({ settings, modelEntry, payload: agentPayload, session: { ...session, summary }, messages, signal: controller.signal });
+          summary = compacted.summary;
+          messages = compacted.messages;
+          agentSessionManager.addEntry(session.id, run.id, { type: "system", text: "Context compressed" });
+          agentSessionManager.saveContext(session.id, messages.slice(1), summary);
+          tokens = estimateTokens(JSON.stringify(sanitizeMessages(messages))) + estimateTokens(JSON.stringify(specs));
+          if (tokens >= agentContextEmergency) {
+            specs = [];
+            status = "context_limit";
+            stopReason = "context_limit";
+          }
+        } catch (error) {
+          agentSessionManager.addEntry(session.id, run.id, { type: "error", text: String(error?.message || error) });
+          if (tokens >= agentContextEmergency) {
+            specs = [];
+            status = "context_limit";
+            stopReason = "context_limit";
+          }
+        }
+      }
+      const body = buildRequestBody(modelEntry, settings, agentPayload, messages, specs);
+      const target = modelEntry.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
+      let textEntryId = "";
+      const message = await streamOpenRouter(settings, body, (event) => {
+        if (event.type === "delta" && event.delta) {
+          if (!textEntryId) {
+            textEntryId = agentSessionManager.addEntry(session.id, run.id, { type: "text", text: "" });
+          }
+          agentSessionManager.appendText(session.id, run.id, textEntryId, event.delta);
+        }
+      }, controller.signal, target);
+      messages.push(message);
+      if (controller.signal.aborted) {
+        status = "canceled";
+        stopReason = parentSignal?.aborted ? "parent_stopped" : "user_canceled";
+        break;
+      }
+      const calls = message.tool_calls || [];
+      if (!calls.length) {
+        if (message.finishReason === "length" && round < maxToolRounds - 1 && status !== "context_limit") {
+          messages.push({ role: "user", content: "Your response was cut off. Continue the delegated task and finish with a complete technical report." });
+          agentSessionManager.saveContext(session.id, messages.slice(1), summary);
+          continue;
+        }
+        terminalText = String(message.content || "").trim();
+        break;
+      }
+      if (!specs.length) {
+        terminalText = String(message.content || "").trim();
+        break;
+      }
+      for (const call of calls) {
+        const callArgs = parseToolArguments(call.function.arguments);
+        const transcriptId = agentSessionManager.addEntry(session.id, run.id, {
+          type: "tool",
+          name: call.function.name,
+          args: capTranscriptText(JSON.stringify(callArgs, null, 2)),
+          status: "running",
+        });
+        let result;
+        const progress = (info) => {
+          onProgress?.({
+            agent: true,
+            status: "running",
+            agentId: session.id,
+            runId: run.id,
+            name: session.name,
+            model: session.model,
+            activity: call.function.name,
+          });
+          if (info?.stdout || info?.stderr) {
+            agentSessionManager.setProgress(
+              session.id,
+              run.id,
+              transcriptId,
+              capTranscriptText(`${info.stdout || ""}${info.stderr ? `\n${info.stderr}` : ""}`, 12000),
+            );
+          }
+        };
+        try {
+          result = await executeTool(
+            projectPath,
+            index,
+            call,
+            mode,
+            settings,
+            false,
+            userContext,
+            chatId,
+            progress,
+            run.id,
+            visualContext,
+            controller.signal,
+            agentRuntime,
+          );
+        } catch (error) {
+          result = { error: String(error?.message || error) };
+        }
+        if (result?.permissionRequired) {
+          const permissionId = `${run.id}:${call.id}`;
+          const requestEvent = { id: permissionId, name: call.function.name, args: callArgs, result: { ...result, agentId: session.id, runId: run.id, agentName: session.name } };
+          emitAgentPermission({ type: "required", callId: permissionId, agentId: session.id, runId: run.id, agentName: session.name, tool: requestEvent });
+          const decision = await new Promise((resolve) => {
+            if (controller.signal.aborted) {
+              resolve({ approved: false });
+              return;
+            }
+            const onAbort = () => {
+              pendingPermissions.delete(permissionId);
+              resolve({ approved: false });
+            };
+            pendingPermissions.set(permissionId, (value) => {
+              controller.signal.removeEventListener("abort", onAbort);
+              resolve(value);
+            });
+            controller.signal.addEventListener("abort", onAbort, { once: true });
+          });
+          emitAgentPermission({ type: "resolved", callId: permissionId, agentId: session.id, runId: run.id });
+          if (decision?.approved) {
+            if (decision.stickyGrant) {
+              try {
+                await recordGrant(projectPath, result, decision.stickyGrant);
+              } catch {}
+            }
+            try {
+              result = await executeApprovedTool(projectPath, result, progress, agentRuntime);
+            } catch (error) {
+              result = { error: String(error?.message || error) };
+            }
+          } else {
+            cancelPendingWrite(result);
+            result = {
+              denied: true,
+              note: decision?.denyFeedback
+                ? `The user denied this action and said: "${String(decision.denyFeedback).slice(0, 2000)}". Do not retry it. Continue safely or finish your report.`
+                : "The user denied this action. Do not retry it or a variant. Continue safely or finish your report.",
+            };
+          }
+        }
+        const content = capToolContent(result);
+        messages.push({ role: "tool", tool_call_id: call.id, content });
+        toolEvents.push({ id: call.id, name: call.function.name, args: callArgs, result });
+        agentSessionManager.updateEntry(session.id, run.id, transcriptId, {
+          status: result?.denied ? "denied" : (result?.error ? "failed" : "completed"),
+        });
+        agentSessionManager.addEntry(session.id, run.id, {
+          type: "tool_result",
+          parentId: transcriptId,
+          name: call.function.name,
+          status: result?.denied ? "denied" : (result?.error ? "failed" : "completed"),
+          text: capTranscriptText(content),
+        });
+        agentSessionManager.saveContext(session.id, messages.slice(1), summary);
+      }
+      if (status === "context_limit") {
+        messages.push({ role: "user", content: "Your context limit is reached. Use no more tools. Write the best complete final report possible from the work already done." });
+      }
+      if (round === maxToolRounds - 1) {
+        status = "max_rounds";
+        stopReason = "max_rounds";
+      }
+    }
+    if (!terminalText && !controller.signal.aborted) {
+      const finalBody = buildRequestBody(modelEntry, settings, agentPayload, [
+        ...messages,
+        { role: "user", content: "Stop using tools and write your complete final technical report now." },
+      ], []);
+      const target = modelEntry.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
+      let finalEntryId = "";
+      const finalMessage = await streamOpenRouter(settings, finalBody, (event) => {
+        if (event.type === "delta" && event.delta) {
+          if (!finalEntryId) {
+            finalEntryId = agentSessionManager.addEntry(session.id, run.id, { type: "text", text: "", final: true });
+          }
+          agentSessionManager.appendText(session.id, run.id, finalEntryId, event.delta);
+        }
+      }, controller.signal, target);
+      terminalText = String(finalMessage.content || "").trim();
+      messages.push(finalMessage);
+    }
+  } catch (error) {
+    if (controller.signal.aborted) {
+      status = "canceled";
+      stopReason = parentSignal?.aborted ? "parent_stopped" : "user_canceled";
+    } else {
+      status = "failed";
+      stopReason = "error";
+      terminalText = terminalText || `Agent failed: ${String(error?.message || error).slice(0, 1000)}`;
+      agentSessionManager.addEntry(session.id, run.id, { type: "error", text: String(error?.message || error) });
+    }
+  } finally {
+    parentSignal?.removeEventListener?.("abort", onParentAbort);
+    agentSessionManager.detachController(session.id, run.id);
+  }
+  const writtenFiles = collectWrittenFiles(toolEvents);
+  agentSessionManager.saveContext(session.id, messages.slice(1), summary);
+  const finished = await agentSessionManager.finish(session.id, run.id, {
+    status,
+    report: terminalText,
+    stopReason,
+    writtenFiles,
+  });
+  onProgress?.({
+    agent: true,
+    status: finished?.status || status,
+    agentId: session.id,
+    runId: run.id,
+    name: session.name,
+    model: session.model,
+  });
+  return {
+    agent: true,
+    deployed: status === "completed",
+    agentId: session.id,
+    runId: run.id,
+    name: session.name,
+    model: session.model,
+    profile: session.profile,
+    status: finished?.status || status,
+    durationMs: finished?.durationMs || Math.max(0, Date.now() - startedAt),
+    stopReason,
+    report: capTranscriptText(terminalText, 30000),
+    writtenFiles,
+  };
 };
 
 const verifyGoal = async (settings, goal, submitted, index, projectPath, conversation, writtenFiles) => {
@@ -3413,6 +3934,9 @@ const runAgentStream = async (payload, sender) => {
   const emitBase = (event) => sender.send("agent:event", { requestId: payload.requestId, ...event });
   const settings = await readSettings();
   Object.assign(payload, await personalizationFields(settings));
+  payload.agentModels = (await modelCatalog())
+    .filter((entry) => entry.apiProvider !== "nvidia" || settings.nvidia?.enabled)
+    .map((entry) => `${entry.id} (${entry.label})`);
   const modelEntry = await catalogEntry(payload.model);
   if (modelEntry?.apiProvider === "nvidia" && !settings.nvidia?.enabled) {
     throw new Error("This model runs on the NVIDIA endpoint, which is turned off. Enable it in Settings > Model eval, or pick another model.");
@@ -3448,6 +3972,7 @@ const runAgentStream = async (payload, sender) => {
     const visualContext = (Array.isArray(payload.visualContext) ? payload.visualContext : []).map((v) => String(v || "")).filter(Boolean).slice(-6);
     const tools = [];
     commandCount = 0;
+    const runtime = { depth: 0, payload, deployments: { count: 0 }, commandBudget: { count: 0 } };
     let finalText = "";
     let lastFinish = "";
     const goalActive = Boolean(payload.goalMode && payload.goal && !payload.planMode);
@@ -3507,12 +4032,21 @@ const runAgentStream = async (payload, sender) => {
           }
           break;
         }
-        for (const call of toolCalls) {
-          let result = null;
+        const runCall = async (call) => {
           const callArgs = parseToolArguments(call.function.arguments);
           const onProgress = (info) => {
             let running;
-            if (info && info.mcp) {
+            if (info && info.agent) {
+              running = {
+                running: info.status === "running",
+                agent: true,
+                status: info.status || "running",
+                agentId: info.agentId || "",
+                runId: info.runId || "",
+                name: info.name || callArgs.name || "",
+                model: info.model || callArgs.model || "",
+              };
+            } else if (info && info.mcp) {
               running = { running: true, mcp: true, mcpServer: info.server, mcpTool: info.tool, mcpTier: info.tier };
             } else if (info && info.webSearch) {
               running = { running: true, webSearch: true, query: info.query || "", depth: info.depth || "", site: info.site || "" };
@@ -3523,11 +4057,37 @@ const runAgentStream = async (payload, sender) => {
             }
             emit({ type: "tool", tool: { id: call.id, name: call.function.name, args: callArgs, result: running } });
           };
+          let result;
           try {
-            result = await executeTool(projectPath, index, call, payload.mode, settings, payload.planMode, userContext, payload.chatId, onProgress, payload.turnId, visualContext, controller.signal);
+            result = await executeTool(projectPath, index, call, payload.mode, settings, payload.planMode, userContext, payload.chatId, onProgress, payload.turnId, visualContext, controller.signal, runtime);
           } catch (error) {
             result = { error: error.message };
           }
+          return { call, callArgs, onProgress, result };
+        };
+        for (let callIndex = 0; callIndex < toolCalls.length; callIndex += 1) {
+          const call = toolCalls[callIndex];
+          if (call.function.name === "deploy_agent" || call.function.name === "continue_agent") {
+            const batch = [];
+            let batchEnd = callIndex;
+            while (batchEnd < toolCalls.length && (toolCalls[batchEnd].function.name === "deploy_agent" || toolCalls[batchEnd].function.name === "continue_agent")) {
+              batch.push(toolCalls[batchEnd]);
+              batchEnd += 1;
+            }
+            const completed = await Promise.all(batch.map((entry) => runCall(entry)));
+            for (const item of completed) {
+              const toolEvent = { id: item.call.id, name: item.call.function.name, args: item.callArgs, result: item.result };
+              tools.push(toolEvent);
+              messages.push({ role: "tool", tool_call_id: item.call.id, content: capToolContent(item.result) });
+              contextTracker.commit();
+              emit({ type: "tool", tool: toolEvent });
+            }
+            callIndex = batchEnd - 1;
+            continue;
+          }
+          const executed = await runCall(call);
+          let result = executed.result;
+          const { callArgs, onProgress } = executed;
           if (result?.permissionRequired) {
             if (controller.signal.aborted) {
               cancelPendingWrite(result);
@@ -3564,7 +4124,7 @@ const runAgentStream = async (payload, sender) => {
                 onProgress(result.mcp ? { mcp: true, server: result.mcpServer, tool: result.mcpTool, tier: result.mcpTier } : { command: result.command });
               }
               try {
-                result = await executeApprovedTool(projectPath, result, onProgress);
+                result = await executeApprovedTool(projectPath, result, onProgress, runtime);
               } catch (error) {
                 result = { error: error.message };
               }
@@ -4136,13 +4696,34 @@ ipcMain.handle("chats:save", async (_, chats) => {
   return true;
 });
 
-ipcMain.handle("background:list", (_, chatId) => backgroundTaskManager?.list(chatId) || []);
+ipcMain.handle("background:list", (_, chatId) => [
+  ...(backgroundTaskManager?.list(chatId) || []),
+  ...(agentSessionManager?.list(chatId) || []),
+]);
 ipcMain.handle("background:get", (_, id) => backgroundTaskManager?.get(id) || null);
-ipcMain.handle("background:cancel", async (_, id) => backgroundTaskManager ? await backgroundTaskManager.cancel(id) : { error: "Background task manager is unavailable." });
-ipcMain.handle("background:clear", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.clearFinished(chatId) : { removed: 0 });
-ipcMain.handle("background:deleteChat", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.deleteChat(chatId) : { removed: 0 });
+ipcMain.handle("background:cancel", async (_, id) => {
+  if (String(id || "").startsWith("agent_")) {
+    return agentSessionManager ? await agentSessionManager.cancel(id) : { error: "Agent session manager is unavailable." };
+  }
+  return backgroundTaskManager ? await backgroundTaskManager.cancel(id) : { error: "Background task manager is unavailable." };
+});
+ipcMain.handle("background:clear", async (_, chatId) => {
+  const [tasks, agents] = await Promise.all([
+    backgroundTaskManager ? backgroundTaskManager.clearFinished(chatId) : { removed: 0 },
+    agentSessionManager ? agentSessionManager.clearFinished(chatId) : { removed: 0 },
+  ]);
+  return { removed: Number(tasks.removed || 0) + Number(agents.removed || 0) };
+});
+ipcMain.handle("background:deleteChat", async (_, chatId) => {
+  const [tasks, agents] = await Promise.all([
+    backgroundTaskManager ? backgroundTaskManager.deleteChat(chatId) : { removed: 0 },
+    agentSessionManager ? agentSessionManager.deleteChat(chatId) : { removed: 0 },
+  ]);
+  return { removed: Number(tasks.removed || 0) + Number(agents.removed || 0) };
+});
 ipcMain.handle("background:claim", async (_, chatId) => backgroundTaskManager ? await backgroundTaskManager.claimPending(chatId) : null);
 ipcMain.handle("background:settleNotification", async (_, id, delivered) => backgroundTaskManager ? await backgroundTaskManager.settleNotification(id, Boolean(delivered)) : false);
+ipcMain.handle("agent:transcript", (_, agentId, runId) => agentSessionManager?.getTranscript(agentId, runId) || null);
 
 ipcMain.handle("models:get", async () => await modelCatalog());
 
@@ -4427,7 +5008,21 @@ app.whenReady().then(async () => {
       }
     },
   });
+  agentSessionManager = createAgentSessionManager({
+    dataFile: getUserFile("agent-sessions.json"),
+    emit: (event) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("background:event", event);
+      }
+    },
+    emitTranscript: (event) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("agent:event", event);
+      }
+    },
+  });
   await backgroundTaskManager.initialize().catch(() => {});
+  await agentSessionManager.initialize().catch(() => {});
   sweepOrphanImages().catch(() => {});
   await createWindow();
   try {
@@ -4437,6 +5032,7 @@ app.whenReady().then(async () => {
 });
 app.on("before-quit", () => {
   backgroundTaskManager?.shutdown();
+  agentSessionManager?.shutdown();
   mcpManager.shutdownAll().catch(() => {});
 });
 app.on("window-all-closed", () => {

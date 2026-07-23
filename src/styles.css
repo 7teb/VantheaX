@@ -1267,6 +1267,16 @@ textarea {
   white-space: nowrap;
 }
 
+.background-task-description {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .background-task-meta {
   display: flex;
   align-items: center;
@@ -1283,6 +1293,11 @@ textarea {
 
 .background-task-card.is-failed .background-task-status {
   color: var(--danger);
+}
+
+.background-task-card.is-context_limit .background-task-status,
+.background-task-card.is-max_rounds .background-task-status {
+  color: var(--warn);
 }
 
 .background-task-card.is-canceled .background-task-status,
@@ -1302,6 +1317,30 @@ textarea {
   text-rendering: optimizeLegibility;
   white-space: nowrap;
   -webkit-font-smoothing: antialiased;
+}
+
+.background-transcript-button {
+  min-height: 24px;
+  margin-top: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 560;
+  cursor: pointer;
+  transition: background .2s ease, border-color .2s ease, color .2s ease, transform .16s ease;
+}
+
+.background-transcript-button:hover {
+  border-color: color-mix(in srgb, var(--line) 68%, var(--text) 32%);
+  background: var(--hover);
+  color: var(--text);
+}
+
+.background-transcript-button:active {
+  transform: scale(.97);
 }
 
 .background-task-cancel {
@@ -1388,6 +1427,190 @@ textarea {
   color: var(--faint);
   font-size: 12.5px;
   text-align: center;
+}
+
+.agent-transcript-head {
+  justify-content: flex-start;
+}
+
+.agent-transcript-head .background-heading {
+  flex: 1;
+}
+
+.agent-transcript-back {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .2s ease, color .2s ease, transform .16s ease;
+}
+
+.agent-transcript-back:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.agent-transcript-back:active {
+  transform: scale(.93);
+}
+
+.agent-transcript-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 5px 11px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.agent-transcript-meta > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-transcript-meta select {
+  max-width: 135px;
+  margin-left: auto;
+  padding: 3px 22px 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font: inherit;
+  outline: none;
+}
+
+.agent-transcript-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 11px 24px;
+}
+
+.agent-transcript-prompt {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-3);
+}
+
+.agent-transcript-label {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.agent-transcript-prompt .markdown,
+.agent-transcript-text {
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.agent-transcript-prompt .markdown > :first-child,
+.agent-transcript-text > :first-child {
+  margin-top: 0;
+}
+
+.agent-transcript-prompt .markdown > :last-child,
+.agent-transcript-text > :last-child {
+  margin-bottom: 0;
+}
+
+.agent-transcript-system {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 1px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.agent-transcript-error {
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, transparent);
+  border-radius: 8px;
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.agent-transcript-tool,
+.agent-transcript-result {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-3);
+}
+
+.agent-transcript-tool > summary,
+.agent-transcript-result > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 31px;
+  padding: 0 9px;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+.agent-transcript-tool > summary::-webkit-details-marker,
+.agent-transcript-result > summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-transcript-result > summary small {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+.agent-transcript-result.is-failed > summary,
+.agent-transcript-result.is-denied > summary {
+  color: var(--danger);
+}
+
+.agent-transcript-tool pre,
+.agent-transcript-result pre,
+.agent-transcript-progress {
+  max-height: 260px;
+  margin: 0;
+  overflow: auto;
+  padding: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-transcript-progress {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-3) 88%, transparent);
 }
 
 .terminal-head {
@@ -3813,6 +4036,33 @@ textarea {
   animation: background-task-in .28s cubic-bezier(.22, .72, .22, 1) both;
 }
 
+.tool-step.agent-deploy,
+.tool-card.agent-deploy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 520;
+  animation: background-task-in .28s cubic-bezier(.22, .72, .22, 1) both;
+}
+
+.tool-card.agent-deploy .timeline-marker {
+  position: absolute;
+}
+
+.tool-card.agent-deploy .tool-title {
+  min-width: 0;
+}
+
+.tool-step.agent-deploy.is-failed,
+.tool-step.agent-deploy.is-canceled,
+.tool-card.agent-deploy.is-failed,
+.tool-card.agent-deploy.is-canceled {
+  color: var(--danger);
+}
+
 .tool-step.live .live-lines {
   font-size: 13px;
   font-weight: 640;
@@ -5030,6 +5280,15 @@ textarea {
   color: var(--text);
 }
 .approval-question svg { color: var(--muted); flex: none; }
+.approval-agent {
+  align-self: flex-start;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 560;
+}
 .approval-command {
   margin: 0;
   background: rgba(0, 0, 0, .22);

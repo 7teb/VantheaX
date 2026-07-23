@@ -17,6 +17,17 @@ contextBridge.exposeInMainWorld("agentApi", {
     ipcRenderer.on("background:event", listener);
     return () => ipcRenderer.removeListener("background:event", listener);
   },
+  getAgentTranscript: (agentId, runId) => ipcRenderer.invoke("agent:transcript", agentId, runId),
+  onAgentEvent: (handler) => {
+    const listener = (_, event) => handler(event);
+    ipcRenderer.on("agent:event", listener);
+    return () => ipcRenderer.removeListener("agent:event", listener);
+  },
+  onAgentPermission: (handler) => {
+    const listener = (_, event) => handler(event);
+    ipcRenderer.on("agent:permission", listener);
+    return () => ipcRenderer.removeListener("agent:permission", listener);
+  },
   getModels: () => ipcRenderer.invoke("models:get"),
   getBalance: () => ipcRenderer.invoke("key:balance"),
   extractMemories: (payload) => ipcRenderer.invoke("memory:extract", payload),
