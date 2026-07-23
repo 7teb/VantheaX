@@ -3536,6 +3536,17 @@ const runAgentStream = async (payload, sender) => {
   }
 };
 
+const normalizeThemeSettings = (theme) => {
+  const next = theme && typeof theme === "object" ? { ...theme } : {};
+  const chrome = typeof next.surfaceSidebar === "string" && next.surfaceSidebar
+    ? next.surfaceSidebar
+    : next.surfaceApp;
+  if (typeof chrome !== "string" || !chrome) {
+    return next;
+  }
+  return { ...next, surfaceApp: chrome, surfaceSidebar: chrome };
+};
+
 const readSettings = async () => {
   const settings = await readJson(getUserFile("settings.json"), {});
   const ws = settings.webSearch || {};
@@ -3568,7 +3579,7 @@ const readSettings = async () => {
     narrator: {
       enabled: Boolean(nar.enabled),
     },
-    theme: settings.theme && typeof settings.theme === "object" ? settings.theme : {},
+    theme: normalizeThemeSettings(settings.theme),
     webSearch: {
       enabled: Boolean(ws.enabled),
       maxResults: Math.min(20, Math.max(1, Number(ws.maxResults) || 5)),
@@ -3591,7 +3602,7 @@ const saveSettings = async (settings) => {
     next.narrator = { ...current.narrator, ...settings.narrator };
   }
   if (settings.theme) {
-    next.theme = { ...current.theme, ...settings.theme };
+    next.theme = normalizeThemeSettings({ ...current.theme, ...settings.theme });
   }
   if (settings.nvidia) {
     next.nvidia = { ...current.nvidia, ...settings.nvidia };
@@ -3891,6 +3902,18 @@ const openExternalUrl = (url) => {
   }
 };
 
+const getWindowState = () => ({
+  maximized: Boolean(mainWindow?.isMaximized()),
+  minimized: Boolean(mainWindow?.isMinimized()),
+  fullscreen: Boolean(mainWindow?.isFullScreen()),
+});
+
+const emitWindowState = () => {
+  if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send("window:state", getWindowState());
+  }
+};
+
 const createWindow = async () => {
   const iconImage = nativeImage.createFromPath(path.join(app.getAppPath(), "Resources", "Logo-taskbar.png"));
   mainWindow = new BrowserWindow({
@@ -3921,9 +3944,16 @@ const createWindow = async () => {
       openExternalUrl(url);
     }
   });
+  mainWindow.on("maximize", emitWindowState);
+  mainWindow.on("unmaximize", emitWindowState);
+  mainWindow.on("minimize", emitWindowState);
+  mainWindow.on("restore", emitWindowState);
+  mainWindow.on("enter-full-screen", emitWindowState);
+  mainWindow.on("leave-full-screen", emitWindowState);
   mainWindow.once("ready-to-show", () => {
     mainWindow.maximize();
     mainWindow.show();
+    emitWindowState();
   });
   if (process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -4146,17 +4176,22 @@ ipcMain.handle("agent:cancel", (_, requestId) => {
   }
   return { ok: Boolean(controller) };
 });
-ipcMain.handle("window:minimize", () => mainWindow?.minimize());
+ipcMain.handle("window:minimize", () => {
+  mainWindow?.minimize();
+  return getWindowState();
+});
 ipcMain.handle("window:maximize", () => {
   if (!mainWindow) {
-    return;
+    return getWindowState();
   }
   if (mainWindow.isMaximized()) {
     mainWindow.unmaximize();
-    return;
+    return getWindowState();
   }
   mainWindow.maximize();
+  return getWindowState();
 });
+ipcMain.handle("window:state", () => getWindowState());
 ipcMain.handle("window:close", () => mainWindow?.close());
 ipcMain.handle("window:zoom", (_, delta) => {
   if (!mainWindow) {

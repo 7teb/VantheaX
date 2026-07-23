@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld("agentApi", {
   cancelStream: (requestId) => ipcRenderer.invoke("agent:cancel", requestId),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   maximizeWindow: () => ipcRenderer.invoke("window:maximize"),
+  getWindowState: () => ipcRenderer.invoke("window:state"),
+  onWindowState: (handler) => {
+    const listener = (_, state) => handler(state);
+    ipcRenderer.on("window:state", listener);
+    return () => ipcRenderer.removeListener("window:state", listener);
+  },
   closeWindow: () => ipcRenderer.invoke("window:close"),
   zoomWindow: (delta) => ipcRenderer.invoke("window:zoom", delta),
   toggleFullscreen: () => ipcRenderer.invoke("window:fullscreen"),

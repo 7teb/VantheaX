@@ -57,6 +57,7 @@ const STRINGS = {
     "mi.about": "About VantheaX",
     "win.minimize": "Minimize",
     "win.maximize": "Maximize",
+    "win.restore": "Restore",
     "win.close": "Close",
     "chat.options": "Chat options",
     "chat.rename": "Rename",
@@ -82,8 +83,13 @@ const STRINGS = {
     "perm.full": "Full auto",
     "perm.fullDesc": "Runs every command, including dangerous ones",
     "model.select": "Select model",
-    "model.effort": "Reasoning effort",
+    "model.effort": "Effort",
     "model.fallback": "Model",
+    "model.advanced": "Advanced",
+    "model.model": "Model",
+    "model.narrator": "Narrator",
+    "model.on": "On",
+    "model.off": "Off",
     "project.choose": "Choose a project",
     "project.search": "Search project",
     "project.none": "No projects",
@@ -144,6 +150,7 @@ const STRINGS = {
     "toollabel.updateTodos": "Updating todos",
     "action.copy": "Copy",
     "action.edit": "Edit",
+    "action.fork": "Fork chat from here",
     "edit.cancel": "Cancel",
     "edit.resend": "Resend",
     "context.title": "Context usage",
@@ -176,7 +183,6 @@ const STRINGS = {
     "design.accent": "Accent",
     "design.sidebar": "Sidebar",
     "design.background": "Background",
-    "design.titlebar": "Titlebar",
     "design.text": "Text",
     "design.fontUi": "UI font",
     "design.fontCode": "Code font",
@@ -381,6 +387,7 @@ const STRINGS = {
     "mi.about": "Über VantheaX",
     "win.minimize": "Minimieren",
     "win.maximize": "Maximieren",
+    "win.restore": "Wiederherstellen",
     "win.close": "Schließen",
     "chat.options": "Chat-Optionen",
     "chat.rename": "Umbenennen",
@@ -406,8 +413,13 @@ const STRINGS = {
     "perm.full": "Voll-Auto",
     "perm.fullDesc": "Führt jeden Befehl aus, auch gefährliche",
     "model.select": "Modell wählen",
-    "model.effort": "Reasoning-Aufwand",
+    "model.effort": "Aufwand",
     "model.fallback": "Modell",
+    "model.advanced": "Erweitert",
+    "model.model": "Modell",
+    "model.narrator": "Narrator",
+    "model.on": "An",
+    "model.off": "Aus",
     "project.choose": "Projekt wählen",
     "project.search": "Projekt suchen",
     "project.none": "Keine Projekte",
@@ -468,6 +480,7 @@ const STRINGS = {
     "toollabel.updateTodos": "To-dos aktualisieren",
     "action.copy": "Kopieren",
     "action.edit": "Bearbeiten",
+    "action.fork": "Chat ab hier verzweigen",
     "edit.cancel": "Abbrechen",
     "edit.resend": "Neu senden",
     "context.title": "Kontext-Auslastung",
@@ -500,7 +513,6 @@ const STRINGS = {
     "design.accent": "Akzent",
     "design.sidebar": "Seitenleiste",
     "design.background": "Hintergrund",
-    "design.titlebar": "Titelleiste",
     "design.text": "Text",
     "design.fontUi": "UI-Schriftart",
     "design.fontCode": "Code-Schriftart",
@@ -783,6 +795,44 @@ const makeChat = (projectPath = "") => ({
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
+
+const forkChatAtMessage = (chat, messageId, id = crypto.randomUUID(), timestamp = new Date().toISOString()) => {
+  const index = (chat?.messages || []).findIndex((message) => message.id === messageId);
+  if (index < 0) {
+    return null;
+  }
+  const messages = structuredClone(chat.messages.slice(0, index + 1));
+  const priorSummaryCount = chat.summaryCount || 0;
+  const keepSummary = priorSummaryCount <= messages.length;
+  return {
+    ...chat,
+    id,
+    pinned: false,
+    title: `${chat.title || "New chat"} (fork)`,
+    messages,
+    summary: keepSummary ? (chat.summary || "") : "",
+    summaryCount: keepSummary ? priorSummaryCount : 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+const deletableAttachmentNames = (chats, chatId) => {
+  const target = chats.find((chat) => chat.id === chatId);
+  const targetNames = new Set((target?.messages || []).map((message) => message?.attachment?.name).filter(Boolean));
+  if (!targetNames.size) {
+    return [];
+  }
+  for (const chat of chats) {
+    if (chat.id === chatId) {
+      continue;
+    }
+    for (const message of chat.messages || []) {
+      targetNames.delete(message?.attachment?.name);
+    }
+  }
+  return [...targetNames];
+};
 
 const imageDataUrlCache = new Map();
 
@@ -1603,28 +1653,34 @@ const MONO_FONTS = [
 
 const THEME_PRESETS = [
   { id: "vantheax", label: "VantheaX", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
-  { id: "vercel", label: "Vercel", accent: "#006efe", surfaceApp: "#111111", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
-  { id: "dracula", label: "Dracula", accent: "#bd93f9", surfaceApp: "#343746", surfaceSidebar: "#21222c", surfaceChat: "#282a36", text: "#f8f8f2" },
-  { id: "nord", label: "Nord", accent: "#88c0d0", surfaceApp: "#3b4252", surfaceSidebar: "#2e3440", surfaceChat: "#2e3440", text: "#eceff4" },
-  { id: "catppuccin", label: "Catppuccin", accent: "#cba6f7", surfaceApp: "#181825", surfaceSidebar: "#11111b", surfaceChat: "#1e1e2e", text: "#cdd6f4" },
-  { id: "gruvbox", label: "Gruvbox", accent: "#fabd2f", surfaceApp: "#3c3836", surfaceSidebar: "#282828", surfaceChat: "#1d2021", text: "#ebdbb2" },
-  { id: "rosepine", label: "Rose Pine", accent: "#ebbcba", surfaceApp: "#26233a", surfaceSidebar: "#191724", surfaceChat: "#1f1d2e", text: "#e0def4" },
-  { id: "onedark", label: "One Dark", accent: "#61afef", surfaceApp: "#21252b", surfaceSidebar: "#1b1f24", surfaceChat: "#282c34", text: "#c8cdd5" },
-  { id: "github", label: "GitHub", accent: "#2f81f7", surfaceApp: "#161b22", surfaceSidebar: "#0d1117", surfaceChat: "#0d1117", text: "#e6edf3" },
-  { id: "everforest", label: "Everforest", accent: "#a7c080", surfaceApp: "#2d353b", surfaceSidebar: "#232a2e", surfaceChat: "#2b3339", text: "#d3c6aa" },
-  { id: "monokai", label: "Monokai", accent: "#a6e22e", surfaceApp: "#3e3d32", surfaceSidebar: "#22231c", surfaceChat: "#272822", text: "#f8f8f2" },
-  { id: "tokyonight", label: "Tokyo Night", accent: "#7aa2f7", surfaceApp: "#1f2335", surfaceSidebar: "#16161e", surfaceChat: "#1a1b26", text: "#c0caf5" },
-  { id: "solarized", label: "Solarized", accent: "#268bd2", surfaceApp: "#073642", surfaceSidebar: "#002b36", surfaceChat: "#00252e", text: "#93a1a1" },
-  { id: "carbon", label: "Carbon", accent: "#78a9ff", surfaceApp: "#1c1c1c", surfaceSidebar: "#161616", surfaceChat: "#0b0b0b", text: "#e6e6e6" },
+  { id: "vercel", label: "Vercel", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
+  { id: "dracula", label: "Dracula", accent: "#bd93f9", surfaceApp: "#21222c", surfaceSidebar: "#21222c", surfaceChat: "#282a36", text: "#f8f8f2" },
+  { id: "nord", label: "Nord", accent: "#88c0d0", surfaceApp: "#2e3440", surfaceSidebar: "#2e3440", surfaceChat: "#2e3440", text: "#eceff4" },
+  { id: "catppuccin", label: "Catppuccin", accent: "#cba6f7", surfaceApp: "#11111b", surfaceSidebar: "#11111b", surfaceChat: "#1e1e2e", text: "#cdd6f4" },
+  { id: "gruvbox", label: "Gruvbox", accent: "#fabd2f", surfaceApp: "#282828", surfaceSidebar: "#282828", surfaceChat: "#1d2021", text: "#ebdbb2" },
+  { id: "rosepine", label: "Rose Pine", accent: "#ebbcba", surfaceApp: "#191724", surfaceSidebar: "#191724", surfaceChat: "#1f1d2e", text: "#e0def4" },
+  { id: "onedark", label: "One Dark", accent: "#61afef", surfaceApp: "#1b1f24", surfaceSidebar: "#1b1f24", surfaceChat: "#282c34", text: "#c8cdd5" },
+  { id: "github", label: "GitHub", accent: "#2f81f7", surfaceApp: "#0d1117", surfaceSidebar: "#0d1117", surfaceChat: "#0d1117", text: "#e6edf3" },
+  { id: "everforest", label: "Everforest", accent: "#a7c080", surfaceApp: "#232a2e", surfaceSidebar: "#232a2e", surfaceChat: "#2b3339", text: "#d3c6aa" },
+  { id: "monokai", label: "Monokai", accent: "#a6e22e", surfaceApp: "#22231c", surfaceSidebar: "#22231c", surfaceChat: "#272822", text: "#f8f8f2" },
+  { id: "tokyonight", label: "Tokyo Night", accent: "#7aa2f7", surfaceApp: "#16161e", surfaceSidebar: "#16161e", surfaceChat: "#1a1b26", text: "#c0caf5" },
+  { id: "solarized", label: "Solarized", accent: "#268bd2", surfaceApp: "#002b36", surfaceSidebar: "#002b36", surfaceChat: "#00252e", text: "#93a1a1" },
+  { id: "carbon", label: "Carbon", accent: "#78a9ff", surfaceApp: "#161616", surfaceSidebar: "#161616", surfaceChat: "#0b0b0b", text: "#e6e6e6" },
 ];
 
 const DEFAULT_THEME = { preset: "vantheax", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed", fontUi: "Open Sans", fontMono: "JetBrains Mono", contrast: 19 };
+
+const normalizeTheme = (input) => {
+  const next = { ...DEFAULT_THEME, ...(input || {}) };
+  const chrome = next.surfaceSidebar || next.surfaceApp || DEFAULT_THEME.surfaceSidebar;
+  return { ...next, surfaceApp: chrome, surfaceSidebar: chrome };
+};
 
 const uiFontStack = (id) => (UI_FONTS.find((f) => f.id === id) || UI_FONTS[0]).stack;
 const monoFontStack = (id) => (MONO_FONTS.find((f) => f.id === id) || MONO_FONTS[0]).stack;
 
 const themeVars = (input) => {
-  const t = { ...DEFAULT_THEME, ...(input || {}) };
+  const t = normalizeTheme(input);
   const c = Math.max(0, Math.min(100, Number(t.contrast) || 0));
   const m = 0.5 + c / 100;
   return {
@@ -1678,7 +1734,6 @@ const App = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [permissionOpen, setPermissionOpen] = useState(false);
-  const [openProviders, setOpenProviders] = useState([]);
   const [collapsedProjects, setCollapsedProjects] = useState(() => { try { return JSON.parse(localStorage.getItem("vantheax:collapsed-projects")) || []; } catch { return []; } });
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [renamingChatId, setRenamingChatId] = useState("");
@@ -1688,6 +1743,7 @@ const App = () => {
   const [keyInput, setKeyInput] = useState("");
   const [status, setStatus] = useState("Ready");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [windowMaximized, setWindowMaximized] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [imageAttachment, setImageAttachment] = useState(null);
   const [planMode, setPlanMode] = useState(false);
@@ -1708,6 +1764,22 @@ const App = () => {
   const messagesRef = useRef(null);
   const compactingRef = useRef(false);
   const pacerRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    api.getWindowState().then((state) => {
+      if (mounted) {
+        setWindowMaximized(Boolean(state?.maximized));
+      }
+    });
+    const unsubscribe = api.onWindowState((state) => {
+      setWindowMaximized(Boolean(state?.maximized));
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [chats, activeChatId]);
   useEffect(() => {
@@ -1734,6 +1806,7 @@ const App = () => {
     setGoalDone(done);
   }, [activeChatId]);
   const messages = activeChat?.messages || [];
+  const turnItems = useMemo(() => buildTurnNavigatorItems(messages), [messages]);
   const lastUserId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       if (messages[i].role === "user") {
@@ -1867,12 +1940,6 @@ const App = () => {
     }
   }, [activeChatId]);
 
-  useEffect(() => {
-    if (currentModel?.provider) {
-      setOpenProviders([currentModel.provider]);
-    }
-  }, [currentModel?.provider]);
-
   const visibleFiles = useMemo(() => {
     const text = fileQuery.trim().toLowerCase();
     const files = projectIndex.files || [];
@@ -1983,13 +2050,7 @@ const App = () => {
   };
 
   const deleteChat = (chatId) => {
-    const target = chats.find((item) => item.id === chatId);
-    const names = [];
-    for (const message of target?.messages || []) {
-      if (message?.attachment?.name) {
-        names.push(message.attachment.name);
-      }
-    }
+    const names = deletableAttachmentNames(chats, chatId);
     if (names.length) {
       api.deleteImages(names).catch(() => {});
     }
@@ -2017,7 +2078,8 @@ const App = () => {
   };
 
   const persistSettings = async (next) => {
-    const saved = await api.saveSettings(next);
+    const payload = next.theme ? { ...next, theme: normalizeTheme(next.theme) } : next;
+    const saved = await api.saveSettings(payload);
     setSettings((current) => ({ ...current, ...saved }));
   };
 
@@ -2250,6 +2312,26 @@ const App = () => {
         setStatus(t("status.ready"));
       }
     }
+  };
+
+  const forkChat = (message) => {
+    if (busy || !activeChat || message?.done === false) {
+      return;
+    }
+    const fork = forkChatAtMessage(activeChat, message.id);
+    if (!fork) {
+      return;
+    }
+    followBottom = true;
+    setChats((current) => [fork, ...current]);
+    setActiveChatId(fork.id);
+    setSearchOpen(false);
+    setTitleAnim(null);
+    setInput("");
+    setImageAttachment(null);
+    setEditingMessageId("");
+    setTodos([]);
+    setGoalDone(false);
   };
 
   const startEditMessage = (message) => {
@@ -2908,9 +2990,15 @@ const App = () => {
         </div>
         <div className="titlebar-center" />
         <div className="titlebar-actions">
-          <button onClick={() => api.minimizeWindow()} title={t("win.minimize")}><Minus size={15} /></button>
-          <button onClick={() => api.maximizeWindow()} title={t("win.maximize")}><Square size={13} /></button>
-          <button className="close" onClick={() => api.closeWindow()} title={t("win.close")}><X size={16} /></button>
+          <button className="caption-button minimize" onClick={() => api.minimizeWindow()} title={t("win.minimize")} aria-label={t("win.minimize")}>
+            <WindowCaptionIcon type="minimize" />
+          </button>
+          <button className="caption-button maximize" onClick={() => api.maximizeWindow()} title={windowMaximized ? t("win.restore") : t("win.maximize")} aria-label={windowMaximized ? t("win.restore") : t("win.maximize")}>
+            <WindowCaptionIcon type={windowMaximized ? "restore" : "maximize"} />
+          </button>
+          <button className="caption-button close" onClick={() => api.closeWindow()} title={t("win.close")} aria-label={t("win.close")}>
+            <WindowCaptionIcon type="close" />
+          </button>
         </div>
       </header>
 
@@ -3027,6 +3115,7 @@ const App = () => {
             </header>
           )}
 
+          {turnItems.length > 1 && <TurnNavigator turns={turnItems} scrollerRef={messagesRef} />}
           {messages.length > 0 && (
             <div className="messages" ref={messagesRef} onScroll={onMessagesScroll} onWheel={onMessagesWheel}>
               {messages.map((message, index) => (
@@ -3035,6 +3124,7 @@ const App = () => {
                     <div className="compaction-marker"><span>{t("context.compactedHere")}</span></div>
                   )}
                   <Message message={message} onAcceptPlan={acceptPlan}
+                    navId={message.role === "user" ? turnIdForMessage(message, index) : ""}
                     isLastUser={message.role === "user" && message.id === lastUserId}
                     editing={editingMessageId === message.id}
                     onStartEdit={() => startEditMessage(message)}
@@ -3043,7 +3133,8 @@ const App = () => {
                     busy={busy}
                     projectPath={projectPath}
                     onUndoTurn={undoTurn}
-                    onReveal={revealPath} />
+                    onReveal={revealPath}
+                    onFork={forkChat} />
                 </React.Fragment>
               ))}
             </div>
@@ -3077,7 +3168,7 @@ const App = () => {
                   <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
                   <PermissionPicker value={settings.mode} open={permissionOpen} onToggle={() => setPermissionOpen(!permissionOpen)} onChange={(mode) => { persistSettings({ mode }); setPermissionOpen(false); }} />
                   <div className="composer-spacer" />
-                  <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} open={modelOpen} openProviders={openProviders} onToggle={() => setModelOpen(!modelOpen)} onToggleProvider={(provider) => setOpenProviders((current) => current.includes(provider) ? current.filter((item) => item !== provider) : [...current, provider])} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} />
+                  <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} narrator={Boolean(settings.narrator?.enabled)} open={modelOpen} onToggle={() => setModelOpen(!modelOpen)} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} onNarratorChange={(enabled) => persistSettings({ narrator: { ...(settings.narrator || {}), enabled } })} />
                   {naming ? (
                     <button className="send-button is-naming" disabled title={t("composer.naming")}>
                       <LoaderIcon size={17} />
@@ -3136,7 +3227,7 @@ const App = () => {
         const leaving = patch.enabled === false && models.find((item) => item.id === settings.model)?.apiProvider === "nvidia";
         const fallback = models.find((item) => item.apiProvider !== "nvidia");
         persistSettings(leaving && fallback ? { nvidia: patch, model: fallback.id, effort: fallback.defaultEffort || "" } : { nvidia: patch });
-      }} onSaveNvidiaKey={(k) => persistSettings({ nvidiaKeyPlain: k })} theme={{ ...DEFAULT_THEME, ...(settings.theme || {}) }} onThemeChange={(patch) => persistSettings({ theme: { ...DEFAULT_THEME, ...(settings.theme || {}), ...patch } })} />}
+      }} onSaveNvidiaKey={(k) => persistSettings({ nvidiaKeyPlain: k })} theme={normalizeTheme(settings.theme)} onThemeChange={(patch) => persistSettings({ theme: normalizeTheme({ ...(settings.theme || {}), ...patch }) })} />}
     </div>
   );
 };
@@ -3149,51 +3240,320 @@ const compactModelName = (model) => {
 };
 
 const EFFORT_LABEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Max", max: "Max", none: "Off", off: "Off", on: "On", disabled: "Off", adaptive: "Adaptive", enabled: "On" };
+const EFFORT_LABEL_DE = { minimal: "Minimal", low: "Niedrig", medium: "Mittel", high: "Hoch", xhigh: "Max", max: "Max", none: "Aus", off: "Aus", on: "An", disabled: "Aus", adaptive: "Adaptiv", enabled: "An" };
+const effortLabel = (value) => ((LANG === "de" ? EFFORT_LABEL_DE : EFFORT_LABEL)[value] || value || "");
 
-const ModelEffortPicker = ({ models, value, effort, open, openProviders, onToggle, onToggleProvider, onModelChange, onEffortChange }) => {
+const turnIdForMessage = (message, index) => String(message?.id || message?.createdAt || `turn-${index}`);
+
+const compactTurnText = (value, limit) => {
+  const text = String(value || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_>#~]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+};
+
+const assistantTurnText = (message) => {
+  if ((message?.content || "").trim()) {
+    return message.content;
+  }
+  return (message?.segments || [])
+    .filter((segment) => segment.type === "text")
+    .map((segment) => segment.content || "")
+    .join(" ");
+};
+
+const buildTurnNavigatorItems = (messages) => {
+  const turns = [];
+  let current = null;
+  (messages || []).forEach((message, index) => {
+    if (message.role === "user") {
+      current = {
+        id: turnIdForMessage(message, index),
+        user: compactTurnText(message.content || message.attachment?.name, 96),
+        assistant: "",
+      };
+      turns.push(current);
+      return;
+    }
+    if (message.role !== "assistant" || !current) {
+      return;
+    }
+    const next = compactTurnText(assistantTurnText(message), 210);
+    current.assistant = compactTurnText(`${current.assistant} ${next}`, 210);
+  });
+  return turns;
+};
+
+const TurnNavigator = ({ turns, scrollerRef }) => {
+  const [activeId, setActiveId] = useState(turns.at(-1)?.id || "");
+  const [preview, setPreview] = useState(null);
+  const previewTimerRef = useRef(0);
+  const scrollRafRef = useRef(0);
+  const updateRafRef = useRef(0);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) {
+      return undefined;
+    }
+    const update = () => {
+      updateRafRef.current = 0;
+      const nodes = [...scroller.querySelectorAll(".message[data-turn-id]")];
+      if (!nodes.length) {
+        return;
+      }
+      const rect = scroller.getBoundingClientRect();
+      const marker = rect.top + Math.min(rect.height * .3, 230);
+      let next = nodes[0].dataset.turnId;
+      for (const node of nodes) {
+        if (node.getBoundingClientRect().top > marker) {
+          break;
+        }
+        next = node.dataset.turnId;
+      }
+      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 12) {
+        next = nodes.at(-1).dataset.turnId;
+      }
+      setActiveId((current) => current === next ? current : next);
+    };
+    const schedule = () => {
+      if (!updateRafRef.current) {
+        updateRafRef.current = requestAnimationFrame(update);
+      }
+    };
+    scroller.addEventListener("scroll", schedule, { passive: true });
+    const observer = new ResizeObserver(schedule);
+    observer.observe(scroller);
+    schedule();
+    return () => {
+      scroller.removeEventListener("scroll", schedule);
+      observer.disconnect();
+      if (updateRafRef.current) {
+        cancelAnimationFrame(updateRafRef.current);
+      }
+    };
+  }, [scrollerRef, turns]);
+
+  useEffect(() => () => {
+    clearTimeout(previewTimerRef.current);
+    if (scrollRafRef.current) {
+      cancelAnimationFrame(scrollRafRef.current);
+    }
+  }, []);
+
+  const showPreview = (turn) => {
+    clearTimeout(previewTimerRef.current);
+    setPreview({ turn, closing: false });
+  };
+
+  const hidePreview = () => {
+    setPreview((current) => current ? { ...current, closing: true } : current);
+    clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => setPreview(null), 190);
+  };
+
+  const scrollToTurn = (turn) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) {
+      return;
+    }
+    const target = [...scroller.querySelectorAll(".message[data-turn-id]")].find((node) => node.dataset.turnId === turn.id);
+    if (!target) {
+      return;
+    }
+    followBottom = false;
+    setActiveId(turn.id);
+    if (scrollRafRef.current) {
+      cancelAnimationFrame(scrollRafRef.current);
+    }
+    const start = scroller.scrollTop;
+    const end = Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, target.offsetTop - 24));
+    const distance = end - start;
+    if (Math.abs(distance) < 2 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      scroller.scrollTop = end;
+      return;
+    }
+    const duration = Math.min(760, Math.max(340, Math.abs(distance) * .34));
+    const started = performance.now();
+    const frame = (now) => {
+      const progress = Math.min(1, (now - started) / duration);
+      const eased = progress < .5
+        ? 4 * progress * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      scroller.scrollTop = start + distance * eased;
+      if (progress < 1) {
+        scrollRafRef.current = requestAnimationFrame(frame);
+      } else {
+        scrollRafRef.current = 0;
+      }
+    };
+    scrollRafRef.current = requestAnimationFrame(frame);
+  };
+
+  const railHeight = Math.min(420, Math.max(72, turns.length * 9));
+  const previewIndex = preview ? turns.findIndex((turn) => turn.id === preview.turn.id) : 0;
+  const previewRatio = turns.length > 1 ? previewIndex / (turns.length - 1) : .5;
+  return (
+    <nav className="turn-navigator" aria-label="Conversation turns" style={{ "--turn-count": turns.length, "--turn-rail-height": `${railHeight}px` }}>
+      <div className="turn-nav-list">
+        {turns.map((turn, index) => (
+          <button
+            key={turn.id}
+            type="button"
+            className={turn.id === activeId ? "turn-nav-item is-active" : "turn-nav-item"}
+            aria-current={turn.id === activeId ? "step" : undefined}
+            aria-label={turn.user || `Turn ${index + 1}`}
+            style={{ "--turn-delay": `${Math.min(index, 18) * 18}ms` }}
+            onMouseEnter={() => showPreview(turn)}
+            onMouseLeave={hidePreview}
+            onFocus={() => showPreview(turn)}
+            onBlur={hidePreview}
+            onClick={() => scrollToTurn(turn)}
+          >
+            <span className="turn-nav-bar" />
+          </button>
+        ))}
+      </div>
+      {preview && (
+        <div className={preview.closing ? "turn-preview-card is-closing" : "turn-preview-card"} style={{ "--turn-preview-top": `${10 + previewRatio * 80}%` }}>
+          <strong>{preview.turn.user}</strong>
+          {preview.turn.assistant && <p>{preview.turn.assistant}</p>}
+        </div>
+      )}
+    </nav>
+  );
+};
+
+const EffortSlider = ({ efforts, value, onChange }) => {
+  const safeEfforts = efforts?.length ? efforts : [value || "high"];
+  const selectedIndex = Math.max(0, safeEfforts.indexOf(value));
+  const progress = safeEfforts.length > 1 ? selectedIndex / (safeEfforts.length - 1) * 100 : 100;
+  const isMax = selectedIndex === safeEfforts.length - 1;
+  return (
+    <div className={isMax ? "effort-slider is-max" : "effort-slider"}>
+      <div className="effort-slider-caption">
+        <span>{t("model.effort")}</span>
+        <strong>{effortLabel(safeEfforts[selectedIndex])}</strong>
+      </div>
+      <div className="effort-slider-control" style={{ "--effort-progress": `${progress}%` }}>
+        <div className="effort-slider-rail" />
+        <div className="effort-slider-fill" />
+        {isMax && (
+          <div className="effort-slider-particles">
+            {Array.from({ length: 12 }, (_, index) => <i key={index} style={{ "--particle-index": index }} />)}
+          </div>
+        )}
+        <div className="effort-slider-stops">
+          {safeEfforts.map((item, index) => <i key={item} className={index <= selectedIndex ? "is-filled" : ""} style={{ left: `${safeEfforts.length > 1 ? index / (safeEfforts.length - 1) * 100 : 100}%` }} />)}
+        </div>
+        <div className="effort-slider-thumb" />
+        <input aria-label={t("model.effort")} type="range" min="0" max={safeEfforts.length - 1} step="1" value={selectedIndex} onChange={(event) => onChange(safeEfforts[Number(event.target.value)])} />
+      </div>
+    </div>
+  );
+};
+
+const ModelEffortPicker = ({ models, value, effort, narrator, open, onToggle, onModelChange, onEffortChange, onNarratorChange }) => {
+  const [advanced, setAdvanced] = useState(false);
+  const [detail, setDetail] = useState("");
   const selected = models.find((model) => model.id === value) || models[0];
   const providers = [...new Set(models.map((model) => model.provider || model.providerKey || "Models"))];
   const hasEfforts = Boolean(selected?.efforts?.length);
   const activeEffort = effort || selected?.defaultEffort;
+  useEffect(() => {
+    if (!open) {
+      setDetail("");
+    }
+  }, [open]);
+  const toggleAdvanced = () => {
+    setAdvanced((current) => !current);
+    setDetail("");
+  };
   return (
-    <div className="model-picker model-effort-picker">
-      <button className="model-effort-trigger" onClick={onToggle}>
+    <div className={open ? "model-picker model-effort-picker is-open" : "model-picker model-effort-picker"}>
+      <button className="model-effort-trigger" onClick={onToggle} aria-expanded={open}>
         <span className="model-name">{compactModelName(selected)}</span>
-        {hasEfforts && <span className="effort-name">{EFFORT_LABEL[activeEffort] || activeEffort}</span>}
-        <ChevronDown size={13} />
+        {hasEfforts && <span className="effort-name">{effortLabel(activeEffort)}</span>}
+        <ChevronDown size={13} className="model-trigger-chevron" />
       </button>
       {open && (
-        <div className="model-menu">
-          <div className="model-menu-title">{t("model.select")}</div>
-          {providers.map((provider) => {
-            const expanded = openProviders.includes(provider);
-            return (
-              <div key={provider} className="model-provider-group">
-                <button className={expanded ? "model-provider is-open" : "model-provider"} onClick={() => onToggleProvider(provider)}>
-                  <span className="model-provider-name">{provider}</span>
-                  <ChevronDown size={14} className="model-provider-arrow" />
+        <div className={advanced ? "model-menu is-advanced" : "model-menu"}>
+          {!advanced ? (
+            <div key="compact" className="model-menu-content is-compact">
+              <button className="model-advanced-toggle" onClick={toggleAdvanced}>
+                <span>{t("model.advanced")}</span>
+                <ChevronRight size={13} />
+              </button>
+              {hasEfforts && <EffortSlider efforts={selected.efforts} value={activeEffort} onChange={onEffortChange} />}
+            </div>
+          ) : (
+            <div key="advanced" className="model-menu-content is-advanced">
+              <button className={detail === "models" ? "model-settings-row is-active" : "model-settings-row"} onClick={() => setDetail((current) => current === "models" ? "" : "models")}>
+                <span>{t("model.model")}</span>
+                <span className="model-settings-value">{compactModelName(selected)}</span>
+                <ChevronRight size={14} />
+              </button>
+              {hasEfforts && (
+                <button className={detail === "effort" ? "model-settings-row is-active" : "model-settings-row"} onClick={() => setDetail((current) => current === "effort" ? "" : "effort")}>
+                  <span>{t("model.effort")}</span>
+                  <span className="model-settings-value">{effortLabel(activeEffort)}</span>
+                  <ChevronRight size={14} />
                 </button>
-                <div className={expanded ? "model-provider-children is-open" : "model-provider-children"}>
-                  <div className="model-provider-children-inner">
-                    {models.filter((model) => (model.provider || model.providerKey || "Models") === provider).map((model) => (
-                      <button key={model.id} className={model.id === value ? "model-option is-active" : "model-option"} onClick={() => onModelChange(model.id)}>
-                        <span>{model.label.replace(`${provider} `, "")}</span>
-                        {model.id === value && <Check size={15} />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {hasEfforts && (
-            <div className="effort-section">
+              )}
+              <button className={detail === "narrator" ? "model-settings-row narrator-row is-active" : "model-settings-row narrator-row"} onClick={() => setDetail((current) => current === "narrator" ? "" : "narrator")}>
+                <span>{t("model.narrator")}</span>
+                <span className="model-settings-value">{narrator ? t("model.on") : t("model.off")}</span>
+                <ChevronRight size={14} />
+              </button>
               <div className="model-menu-divider" />
-              <div className="effort-section-label">{t("model.effort")}</div>
-              {selected.efforts.map((item) => (
-                <button key={item} className={item === activeEffort ? "effort-option is-active" : "effort-option"} onClick={() => onEffortChange(item)}>
-                  <span>{EFFORT_LABEL[item] || item}</span>
-                  {item === activeEffort && <Check size={14} />}
+              <button className="model-advanced-toggle is-open" onClick={toggleAdvanced}>
+                <span>{t("model.advanced")}</span>
+                <ChevronUp size={13} />
+              </button>
+            </div>
+          )}
+          {advanced && detail === "models" && (
+            <div className="model-detail-panel model-list-panel">
+              {providers.map((provider) => (
+                <div key={provider} className="model-detail-provider">
+                  <div className="model-detail-title">{provider}</div>
+                  {models.filter((model) => (model.provider || model.providerKey || "Models") === provider).map((model) => (
+                    <button key={model.id} className={model.id === value ? "model-option is-active" : "model-option"} onClick={() => onModelChange(model.id)}>
+                      <span>{model.label.replace(`${provider} `, "")}</span>
+                      {model.id === value && <Check size={15} />}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+          {advanced && detail === "effort" && hasEfforts && (
+            <div className="model-detail-panel effort-detail-panel">
+              <div className="model-detail-title">{t("model.effort")}</div>
+              <div className="effort-detail-options">
+                {selected.efforts.map((item) => (
+                  <button key={item} className={item === activeEffort ? "effort-option is-active" : "effort-option"} onClick={() => onEffortChange(item)}>
+                    <span>{effortLabel(item)}</span>
+                    {item === activeEffort && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {advanced && detail === "narrator" && (
+            <div className="model-detail-panel narrator-detail-panel">
+              <div className="model-detail-title">{t("model.narrator")}</div>
+              {[true, false].map((enabled) => (
+                <button key={String(enabled)} className={enabled === narrator ? "narrator-option is-active" : "narrator-option"} onClick={() => onNarratorChange(enabled)}>
+                  <span>{enabled ? t("model.on") : t("model.off")}</span>
+                  {enabled === narrator && <Check size={14} />}
                 </button>
               ))}
             </div>
@@ -3250,6 +3610,20 @@ const ProjectPicker = ({ open, query, setQuery, projects, selectedPath, onToggle
         </button>
       </div>
   </div>
+);
+
+const WindowCaptionIcon = ({ type }) => (
+  <svg className={`caption-icon caption-icon-${type}`} viewBox="0 0 12 12" aria-hidden="true">
+    {type === "minimize" && <path d="M2 6.5h8" />}
+    {type === "maximize" && <rect x="2.5" y="2.5" width="7" height="7" />}
+    {type === "restore" && (
+      <>
+        <path d="M4.5 4V2.5h5v5H8" />
+        <rect x="2.5" y="4.5" width="5" height="5" />
+      </>
+    )}
+    {type === "close" && <path d="m2.5 2.5 7 7m0-7-7 7" />}
+  </svg>
 );
 
 const TitlebarMenu = ({ open, setOpen, actions }) => {
@@ -3441,7 +3815,7 @@ const BrandMenu = ({ open, onToggle }) => (
   <div className="rail-brand">
     <button className="rail-brand-button" onClick={onToggle}>
       <span className="rail-brand-name">VantheaX</span>
-      <ChevronUp className={open ? "rail-brand-chevron is-open" : "rail-brand-chevron"} size={18} strokeWidth={2.75} />
+      <ChevronUp className={open ? "rail-brand-chevron is-open" : "rail-brand-chevron"} size={13} strokeWidth={2.25} />
     </button>
     <div className={open ? "brand-menu open" : "brand-menu"}>
       <button className="brand-menu-row is-active" onClick={onToggle}>
@@ -3508,6 +3882,15 @@ const CopyIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
     <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+  </svg>
+);
+
+const ForkIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M14.828 14.828 21 21" />
+    <path d="M21 16v5h-5" />
+    <path d="m21 3-9 9-4-4-6 6" />
+    <path d="M21 8V3h-5" />
   </svg>
 );
 
@@ -3811,13 +4194,7 @@ const AttachmentImage = ({ attachment }) => {
 
 const CompressingOverlay = () => (
   <div className="compressing">
-    <svg className="compressing-screen" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <path d="M8 21h8" />
-      <path d="M12 17v4" />
-      <circle className="compressing-eye" cx="9" cy="10" r="1.3" fill="currentColor" stroke="none" />
-      <circle className="compressing-eye" cx="15" cy="10" r="1.3" fill="currentColor" stroke="none" />
-    </svg>
+    <LoaderIcon size={18} className="compressing-spinner" />
     <span className="live-label" data-shimmer-label={t("context.compressing")}>{t("context.compressing")}</span>
   </div>
 );
@@ -4577,7 +4954,7 @@ const FileChangesCard = ({ message, projectPath, onUndo, onReveal }) => {
   );
 };
 
-const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy, projectPath, onUndoTurn, onReveal }) => {
+const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy, projectPath, onUndoTurn, onReveal, onFork }) => {
   const sawWorkingRef = useRef(false);
   const [draft, setDraft] = useState(message.content || "");
   const [copied, setCopied] = useState(false);
@@ -4591,11 +4968,18 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
       setDraft(message.content || "");
     }
   }, [editing]);
+  const copyMessage = () => {
+    try {
+      navigator.clipboard?.writeText(message.content || "").catch(() => {});
+    } catch {}
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
   if (message.role === "user") {
     if (editing) {
       const rows = Math.min(14, Math.max(2, (draft.match(/\n/g) || []).length + 1));
       return (
-        <div className="message user">
+        <div className="message user" data-turn-id={navId || undefined}>
           <div className="user-editor">
             <textarea className="user-editor-input" value={draft} autoFocus rows={rows}
               onChange={(event) => setDraft(event.target.value)}
@@ -4615,15 +4999,8 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
         </div>
       );
     }
-    const copyMessage = () => {
-      try {
-        navigator.clipboard?.writeText(message.content || "");
-      } catch {}
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    };
     return (
-      <div className="message user">
+      <div className="message user" data-turn-id={navId || undefined}>
         <div className="message-surface user-surface">
           {message.attachment && (
             <div className="message-image">
@@ -4641,12 +5018,23 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
       </div>
     );
   }
+  const assistantActions = message.done !== false && (
+    <div className="assistant-actions">
+      <button type="button" className="assistant-action" title={t("action.copy")} onClick={copyMessage}>
+        {copied ? <Check size={13} /> : <CopyIcon size={13} />}
+      </button>
+      <button type="button" className="assistant-action" title={t("action.fork")} onClick={() => onFork?.(message)} disabled={busy}>
+        <ForkIcon size={13} />
+      </button>
+    </div>
+  );
   if (message.error) {
     return (
-      <div className="message assistant">
+      <div className="message assistant" data-turn-id={navId || undefined}>
         <div className="message-surface assistant-surface error">
           <div className="message-text plain">{message.content}</div>
         </div>
+        {assistantActions}
       </div>
     );
   }
@@ -4675,7 +5063,7 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
       }
     }
     return (
-      <div className="message assistant">
+      <div className="message assistant" data-turn-id={navId || undefined}>
         <div className="message-surface assistant-surface">
           {hasWork && <WorkLog segments={workSegs} startedAt={message.startedAt} workMs={message.workMs} working={working} liveTool={working ? message.liveTool : null} hasPlan={Boolean(planSeg)} />}
           {planSeg && <PlanCard plan={planSeg.tool.result.plan} onAccept={onAcceptPlan} accepted={message.planAccepted} />}
@@ -4687,17 +5075,19 @@ const Message = ({ message, onAcceptPlan, isLastUser, editing, onStartEdit, onCa
           {hasWork && working && !message.liveTool && <NarrationRow />}
           {!working && <FileChangesCard message={message} projectPath={projectPath} onUndo={onUndoTurn} onReveal={onReveal} />}
         </div>
+        {assistantActions}
       </div>
     );
   }
   const planTool = message.tools?.find((tool) => tool.result?.plan);
   return (
-    <div className="message assistant">
+    <div className="message assistant" data-turn-id={navId || undefined}>
       <div className="message-surface assistant-surface">
         {Boolean((message.content || "").trim()) && <div className="message-text markdown"><MarkdownMessage content={message.content} /></div>}
         {planTool && <PlanCard plan={planTool.result.plan} onAccept={onAcceptPlan} accepted={message.planAccepted} />}
         {Boolean(message.tools?.length) && <ToolTimeline tools={message.tools} />}
       </div>
+      {assistantActions}
     </div>
   );
 };
@@ -5373,7 +5763,7 @@ const ModelEvalSettings = ({ config, hasKey, models, onChange, onSaveKey }) => {
           <li key={model.id}>
             <span className="eval-model-name">{model.label}</span>
             <code>{model.apiId}</code>
-            <span className="eval-model-efforts">{(model.efforts || []).map((item) => EFFORT_LABEL[item] || item).join(" / ")}</span>
+            <span className="eval-model-efforts">{(model.efforts || []).map(effortLabel).join(" / ")}</span>
           </li>
         ))}
       </ul>
@@ -5420,13 +5810,13 @@ const ThemeSelect = ({ value, options, onChange, swatch }) => {
 };
 
 const DesignSettings = ({ theme, onChange }) => {
-  const t0 = { ...DEFAULT_THEME, ...(theme || {}) };
+  const t0 = normalizeTheme(theme);
   const applyPreset = (id) => {
     const preset = THEME_PRESETS.find((item) => item.id === id);
     if (!preset) {
       return;
     }
-    onChange({ preset: id, accent: preset.accent, surfaceApp: preset.surfaceApp, surfaceSidebar: preset.surfaceSidebar, surfaceChat: preset.surfaceChat, text: preset.text });
+    onChange({ preset: id, accent: preset.accent, surfaceApp: preset.surfaceSidebar, surfaceSidebar: preset.surfaceSidebar, surfaceChat: preset.surfaceChat, text: preset.text });
   };
   const setColor = (key, val) => onChange({ [key]: val, preset: "custom" });
   const colorRow = (labelKey, key) => (
@@ -5438,6 +5828,15 @@ const DesignSettings = ({ theme, onChange }) => {
       </label>
     </div>
   );
+  const chromeColorRow = (
+    <div className="design-row">
+      <span className="design-row-label">{t("design.sidebar")}</span>
+      <label className="design-color">
+        <span className="design-color-hex">{String(t0.surfaceSidebar).toUpperCase()}</span>
+        <input type="color" value={t0.surfaceSidebar} onChange={(event) => onChange({ surfaceApp: event.target.value, surfaceSidebar: event.target.value, preset: "custom" })} />
+      </label>
+    </div>
+  );
   return (
     <>
       <div className="modal-title"><SunIcon size={19} />{t("settings.tabDesign")}</div>
@@ -5446,9 +5845,8 @@ const DesignSettings = ({ theme, onChange }) => {
         <ThemeSelect value={t0.preset} options={THEME_PRESETS} onChange={applyPreset} swatch={(item) => (item ? item.accent : "transparent")} />
       </div>
       {colorRow("design.accent", "accent")}
-      {colorRow("design.sidebar", "surfaceSidebar")}
+      {chromeColorRow}
       {colorRow("design.background", "surfaceChat")}
-      {colorRow("design.titlebar", "surfaceApp")}
       {colorRow("design.text", "text")}
       <div className="design-row">
         <span className="design-row-label">{t("design.fontUi")}</span>
