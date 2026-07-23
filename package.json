@@ -22,6 +22,7 @@
       "dist/**/*",
       "electron/**/*",
       "config/**/*",
+      "Resources/**/*",
       "package.json",
       "!node_modules/node-pty/{deps,src,third_party}/**",
       "!node_modules/node-pty/prebuilds/{darwin-x64,darwin-arm64,linux-x64,linux-arm64,win32-arm64}/**",
@@ -34,7 +35,7 @@
       "target": [
         "dir"
       ],
-      "icon": "build/icon.ico"
+      "icon": "Resources/Logo-taskbar.png"
     },
     "asar": true
   },

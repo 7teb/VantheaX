@@ -112,6 +112,7 @@ const STRINGS = {
     "edit.nFiles": "{n} files edited",
     "cluster.commands": "Ran {n} commands",
     "cluster.reads": "Read {n} files",
+    "cluster.mcp": "Ran {n} MCP commands",
     "todo.tasks": "Tasks",
     "todo.none": "No tasks yet",
     "todo.goal": "Goal",
@@ -170,6 +171,17 @@ const STRINGS = {
     "settings.tabMcp": "MCP servers",
     "settings.tabWebSearch": "Web search",
     "settings.tabPersonalization": "Personalization",
+    "settings.tabDesign": "Design",
+    "design.preset": "Theme",
+    "design.accent": "Accent",
+    "design.sidebar": "Sidebar",
+    "design.background": "Background",
+    "design.titlebar": "Titlebar",
+    "design.text": "Text",
+    "design.fontUi": "UI font",
+    "design.fontCode": "Code font",
+    "design.contrast": "Contrast",
+    "design.reset": "Reset to default",
     "settings.tabModelEval": "Model eval",
     "eval.enable": "Enable NVIDIA models",
     "eval.key": "NVIDIA API key",
@@ -214,6 +226,10 @@ const STRINGS = {
     "toollabel.webSearch": "Searching the web",
     "toollabel.analyzeImage": "Analyzing image",
     "toollabel.datetime": "Checking the date and time",
+    "toollabel.remember": "Saving a memory",
+    "toollabel.forget": "Forgetting a memory",
+    "toollabel.listMemories": "Reading memories",
+    "memory.none": "No memories saved yet",
     "web.enable": "Enable web search",
     "web.key": "Tavily API key",
     "web.results": "Results per search",
@@ -280,6 +296,8 @@ const STRINGS = {
     "approval.questionMcp": "May I run the MCP tool {x}?",
     "approval.questionWrite": "May I write to {x}?",
     "approval.questionAddMcp": "May I add and connect the MCP server “{x}”?",
+    "approval.questionRemember": "May I save this memory?",
+    "approval.questionForget": "May I delete this memory?",
     "approval.yes": "Yes",
     "approval.no": "No, tell it what to do differently",
     "approval.skip": "Skip",
@@ -418,6 +436,7 @@ const STRINGS = {
     "edit.nFiles": "{n} Dateien bearbeitet",
     "cluster.commands": "{n} Befehle ausgeführt",
     "cluster.reads": "{n} Dateien gelesen",
+    "cluster.mcp": "{n} MCP-Befehle ausgeführt",
     "todo.tasks": "Aufgaben",
     "todo.none": "Noch keine Aufgaben",
     "todo.goal": "Ziel",
@@ -476,6 +495,17 @@ const STRINGS = {
     "settings.tabMcp": "MCP-Server",
     "settings.tabWebSearch": "Websuche",
     "settings.tabPersonalization": "Personalisierung",
+    "settings.tabDesign": "Design",
+    "design.preset": "Theme",
+    "design.accent": "Akzent",
+    "design.sidebar": "Seitenleiste",
+    "design.background": "Hintergrund",
+    "design.titlebar": "Titelleiste",
+    "design.text": "Text",
+    "design.fontUi": "UI-Schriftart",
+    "design.fontCode": "Code-Schriftart",
+    "design.contrast": "Kontrast",
+    "design.reset": "Auf Standard zurücksetzen",
     "settings.tabModelEval": "Modell-Eval",
     "eval.enable": "NVIDIA-Modelle aktivieren",
     "eval.key": "NVIDIA-API-Key",
@@ -520,6 +550,10 @@ const STRINGS = {
     "toollabel.webSearch": "Durchsucht das Web",
     "toollabel.analyzeImage": "Bild wird analysiert",
     "toollabel.datetime": "Prüft Datum und Uhrzeit",
+    "toollabel.remember": "Speichert eine Erinnerung",
+    "toollabel.forget": "Vergisst eine Erinnerung",
+    "toollabel.listMemories": "Liest Erinnerungen",
+    "memory.none": "Noch keine Erinnerungen gespeichert",
     "web.enable": "Websuche aktivieren",
     "web.key": "Tavily-API-Key",
     "web.results": "Treffer pro Suche",
@@ -586,6 +620,8 @@ const STRINGS = {
     "approval.questionMcp": "Darf ich das MCP-Tool {x} ausführen?",
     "approval.questionWrite": "Darf ich {x} schreiben?",
     "approval.questionAddMcp": "Darf ich den MCP-Server „{x}“ hinzufügen und verbinden?",
+    "approval.questionRemember": "Darf ich mir das dauerhaft merken?",
+    "approval.questionForget": "Darf ich diese Erinnerung löschen?",
     "approval.yes": "Ja",
     "approval.no": "Nein, sag was anders gemacht werden soll",
     "approval.skip": "Überspringen",
@@ -926,7 +962,7 @@ const NARRATE_TYPE_CPS = 45;
 const NARRATE_MIN_HOLD_MS = 2400;
 const NARRATE_ACTION_HOLD_MS = 20000;
 const NARRATE_FIRST_LINE_MIN_MS = 2500;
-const NARRATE_FADE_MS = 700;
+const NARRATE_HANDOFF_GRACE_MS = 250;
 const NARRATE_QUEUE_MAX = 5;
 
 // a trailing ellipsis means the model is still doing the thing, so the line waits it out
@@ -948,8 +984,10 @@ const narrationStore = (() => {
     suppressedTick: -1,
     seenAppliedToolIds: new Set(),
     suppressedByProgress: false,
-    fading: false,
     currentPauseAfter: false,
+    handoffResolvers: [],
+    handoffFrame: 0,
+    handoffTimer: 0,
     raf: 0,
     carry: 0,
     lastFrame: 0,
@@ -967,12 +1005,30 @@ const narrationStore = (() => {
     }
   };
 
-  const eligible = () => !s.suppressedByProgress && !s.fading && s.queue.length > 0 && s.queue[0].tick === s.appliedTick;
+  const eligible = () => !s.suppressedByProgress && !s.handoffResolvers.length && s.queue.length > 0 && s.queue[0].tick === s.appliedTick;
 
   const park = () => {
     if (s.raf) {
       cancelAnimationFrame(s.raf);
       s.raf = 0;
+    }
+  };
+
+  const releaseHandoff = () => {
+    if (s.handoffFrame) {
+      cancelAnimationFrame(s.handoffFrame);
+      s.handoffFrame = 0;
+    }
+    if (s.handoffTimer) {
+      clearTimeout(s.handoffTimer);
+      s.handoffTimer = 0;
+    }
+    if (!s.handoffResolvers.length) {
+      return;
+    }
+    const resolvers = s.handoffResolvers.splice(0);
+    for (const resolve of resolvers) {
+      resolve();
     }
   };
 
@@ -984,7 +1040,6 @@ const narrationStore = (() => {
     s.currentPauseAfter = Boolean(next.pauseAfter);
     s.typed = 1;
     s.startedAt = now;
-    s.fading = false;
     s.holdUntil = next.text.length <= 1 ? now + NARRATE_MIN_HOLD_MS : 0;
     s.clearUntil = next.text.length <= 1 ? now + (s.currentPauseAfter ? NARRATE_MIN_HOLD_MS : narrateHoldFor(next.text)) : 0;
     s.carry = 0;
@@ -1008,8 +1063,22 @@ const narrationStore = (() => {
         s.carry -= take;
         s.typed = Math.min(s.current.length, s.typed + take);
         if (s.typed >= s.current.length) {
-          s.holdUntil = now + NARRATE_MIN_HOLD_MS;
-          s.clearUntil = now + (s.fading ? NARRATE_FADE_MS : (s.currentPauseAfter ? NARRATE_MIN_HOLD_MS : narrateHoldFor(s.current)));
+          if (s.handoffResolvers.length) {
+            s.holdUntil = 0;
+            s.clearUntil = 0;
+            if (!s.handoffFrame) {
+              s.handoffFrame = requestAnimationFrame(() => {
+                s.handoffFrame = 0;
+                s.current = "";
+                s.typed = 0;
+                emit();
+                releaseHandoff();
+              });
+            }
+          } else {
+            s.holdUntil = now + NARRATE_MIN_HOLD_MS;
+            s.clearUntil = now + (s.currentPauseAfter ? NARRATE_MIN_HOLD_MS : narrateHoldFor(s.current));
+          }
         }
       }
     } else if (now >= s.holdUntil && eligible()) {
@@ -1017,10 +1086,9 @@ const narrationStore = (() => {
     } else if (now >= s.clearUntil) {
       s.current = "";
       s.typed = 0;
-      s.fading = false;
     }
     emit();
-    if (s.current || eligible()) {
+    if (!s.handoffFrame && (s.current || eligible())) {
       s.raf = requestAnimationFrame(step);
     }
   };
@@ -1043,11 +1111,11 @@ const narrationStore = (() => {
     s.suppressedTick = -1;
     s.seenAppliedToolIds = new Set();
     s.suppressedByProgress = false;
-    s.fading = false;
     s.currentPauseAfter = false;
     s.firstLineDone = false;
     s.carry = 0;
     s.lastFrame = 0;
+    releaseHandoff();
   };
 
   return {
@@ -1085,28 +1153,48 @@ const narrationStore = (() => {
         s.queue = s.queue.filter((item) => item.tick >= s.appliedTick);
         s.current = "";
         s.typed = 0;
-        s.fading = false;
+        releaseHandoff();
         emit();
       }
       kick();
     },
-    applyDelta(requestId) {
+    handoffDelta(requestId) {
       if (s.owner !== requestId) {
-        return;
+        return Promise.resolve();
       }
       s.suppressedByProgress = false;
       s.suppressedTick = s.appliedTick;
       s.queue = s.queue.filter((item) => item.tick !== s.appliedTick);
-      // let a half-typed line finish its sentence instead of snapping to "Thinking" mid-word
-      if (s.current && s.typed < s.current.length) {
-        s.fading = true;
-      } else {
+      if (!s.current) {
+        return Promise.resolve();
+      }
+      if (s.typed >= s.current.length) {
         s.current = "";
         s.typed = 0;
-        s.fading = false;
+        s.holdUntil = 0;
+        s.clearUntil = 0;
+        emit();
+        return new Promise((resolve) => {
+          s.handoffResolvers.push(resolve);
+          releaseHandoff();
+        });
       }
-      emit();
-      kick();
+      return new Promise((resolve) => {
+        s.handoffResolvers.push(resolve);
+        if (!s.handoffTimer) {
+          const remaining = Math.max(1, s.current.length - s.typed);
+          s.handoffTimer = setTimeout(() => {
+            s.handoffTimer = 0;
+            s.current = "";
+            s.typed = 0;
+            s.holdUntil = 0;
+            s.clearUntil = 0;
+            emit();
+            releaseHandoff();
+          }, Math.ceil((remaining / NARRATE_TYPE_CPS) * 1000) + NARRATE_HANDOFF_GRACE_MS);
+        }
+        kick();
+      });
     },
     suppress(requestId) {
       if (s.owner !== requestId) {
@@ -1115,7 +1203,7 @@ const narrationStore = (() => {
       s.suppressedByProgress = true;
       s.current = "";
       s.typed = 0;
-      s.fading = false;
+      releaseHandoff();
       emit();
     },
     reset(requestId) {
@@ -1140,7 +1228,100 @@ const narrationStore = (() => {
 const useNarrationLine = () => useSyncExternalStore(narrationStore.subscribe, narrationStore.getLine);
 const useLiveLabel = () => useNarrationLine() || t("work.thinking");
 
-const createStreamPacer = (apply) => {
+const contextUsageStore = (() => {
+  const subscribers = new Set();
+  const cache = new Map();
+  let activeChatId = "";
+  let activeRequestId = "";
+  let activeRevision = 0;
+  let snapshotSequence = 0;
+  let current = null;
+
+  const emit = () => {
+    for (const subscriber of subscribers) {
+      subscriber();
+    }
+  };
+
+  const setCurrent = (usage) => {
+    if (current === usage) {
+      return;
+    }
+    current = usage;
+    emit();
+  };
+
+  return {
+    activate(chatId) {
+      const id = String(chatId || "");
+      if (id === activeChatId) {
+        return;
+      }
+      activeChatId = id;
+      activeRequestId = "";
+      activeRevision = 0;
+      snapshotSequence += 1;
+      setCurrent(cache.get(id) || null);
+    },
+    begin(chatId, requestId) {
+      const id = String(chatId || "");
+      if (id !== activeChatId) {
+        activeChatId = id;
+        setCurrent(cache.get(id) || null);
+      }
+      activeRequestId = String(requestId || "");
+      activeRevision = 0;
+      snapshotSequence += 1;
+    },
+    end(requestId) {
+      if (activeRequestId && String(requestId || "") === activeRequestId) {
+        activeRequestId = "";
+        snapshotSequence += 1;
+      }
+    },
+    acceptEvent(event) {
+      if (!event?.usage || String(event.chatId || "") !== activeChatId || String(event.requestId || "") !== activeRequestId) {
+        return false;
+      }
+      const revision = Number(event.revision) || 0;
+      if (revision <= activeRevision) {
+        return false;
+      }
+      activeRevision = revision;
+      cache.set(activeChatId, event.usage);
+      setCurrent(event.usage);
+      if (event.phase === "settled") {
+        activeRequestId = "";
+        snapshotSequence += 1;
+      }
+      return true;
+    },
+    startSnapshot(chatId) {
+      const id = String(chatId || "");
+      snapshotSequence += 1;
+      return { chatId: id, sequence: snapshotSequence };
+    },
+    acceptSnapshot(ticket, usage) {
+      if (!usage || usage.error || !ticket || ticket.chatId !== activeChatId || ticket.sequence !== snapshotSequence || activeRequestId) {
+        return false;
+      }
+      cache.set(activeChatId, usage);
+      setCurrent(usage);
+      return true;
+    },
+    getUsage() {
+      return current;
+    },
+    subscribe(fn) {
+      subscribers.add(fn);
+      return () => subscribers.delete(fn);
+    },
+  };
+})();
+
+const useContextUsage = () => useSyncExternalStore(contextUsageStore.subscribe, contextUsageStore.getUsage);
+
+const createStreamPacer = (apply, beforeText = null) => {
   const queue = [];
   let queuedChars = 0;
   let raf = 0;
@@ -1150,6 +1331,10 @@ const createStreamPacer = (apply) => {
   let resolveDrained = null;
   let watchdog = 0;
   let watchedChars = -1;
+  let textGateOpen = false;
+  let textGatePromise = null;
+  let gateWakeScheduled = false;
+  let flushing = false;
 
   const settle = () => {
     if (queue.length || !resolveDrained) {
@@ -1164,6 +1349,44 @@ const createStreamPacer = (apply) => {
     done();
   };
 
+  const resetTextGate = (event) => {
+    if (event?.type === "tool" || event?.type === "tool_progress") {
+      textGateOpen = false;
+    }
+  };
+
+  const applyEvent = (event) => {
+    apply(event);
+    resetTextGate(event);
+  };
+
+  const ensureTextGate = () => {
+    if (textGateOpen || !beforeText) {
+      return null;
+    }
+    if (!textGatePromise) {
+      textGatePromise = Promise.resolve()
+        .then(() => beforeText())
+        .catch(() => {})
+        .then(() => {
+          textGateOpen = true;
+          textGatePromise = null;
+        });
+    }
+    return textGatePromise;
+  };
+
+  const wakeAfterGate = (pending) => {
+    if (!pending || gateWakeScheduled) {
+      return;
+    }
+    gateWakeScheduled = true;
+    pending.finally(() => {
+      gateWakeScheduled = false;
+      kick();
+    });
+  };
+
   const applyAll = () => {
     let text = "";
     while (queue.length) {
@@ -1173,13 +1396,13 @@ const createStreamPacer = (apply) => {
         continue;
       }
       if (text) {
-        apply({ type: "delta", delta: text });
+        applyEvent({ type: "delta", delta: text });
         text = "";
       }
-      apply(head);
+      applyEvent(head);
     }
     if (text) {
-      apply({ type: "delta", delta: text });
+      applyEvent({ type: "delta", delta: text });
     }
     queuedChars = 0;
   };
@@ -1199,6 +1422,15 @@ const createStreamPacer = (apply) => {
     while (queue.length) {
       const head = queue[0];
       if (typeof head === "string") {
+        const pending = ensureTextGate();
+        if (pending) {
+          if (text) {
+            applyEvent({ type: "delta", delta: text });
+            text = "";
+          }
+          wakeAfterGate(pending);
+          break;
+        }
         if (budget < 1) {
           break;
         }
@@ -1214,16 +1446,18 @@ const createStreamPacer = (apply) => {
         continue;
       }
       if (text) {
-        apply({ type: "delta", delta: text });
+        applyEvent({ type: "delta", delta: text });
         text = "";
       }
-      apply(queue.shift());
+      applyEvent(queue.shift());
     }
     if (text) {
-      apply({ type: "delta", delta: text });
+      applyEvent({ type: "delta", delta: text });
     }
     if (queue.length) {
-      raf = requestAnimationFrame(drain);
+      if (!textGatePromise) {
+        raf = requestAnimationFrame(drain);
+      }
       return;
     }
     lastFrame = 0;
@@ -1232,7 +1466,7 @@ const createStreamPacer = (apply) => {
   };
 
   const kick = () => {
-    if (!raf && queue.length) {
+    if (!raf && !flushing && !textGatePromise && queue.length) {
       raf = requestAnimationFrame(drain);
     }
   };
@@ -1268,6 +1502,10 @@ const createStreamPacer = (apply) => {
         resolveDrained = resolve;
         watchedChars = -1;
         watchdog = setInterval(() => {
+          if (textGatePromise) {
+            watchedChars = queuedChars;
+            return;
+          }
           if (queuedChars !== watchedChars) {
             watchedChars = queuedChars;
             return;
@@ -1281,8 +1519,43 @@ const createStreamPacer = (apply) => {
         }, STREAM_STALL_CHECK);
       });
     },
+    async flushAfterGate() {
+      ended = true;
+      flushing = true;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      lastFrame = 0;
+      carry = 0;
+      let text = "";
+      while (queue.length) {
+        const head = queue.shift();
+        if (typeof head === "string") {
+          const pending = ensureTextGate();
+          if (pending) {
+            await pending;
+          }
+          text += head;
+          queuedChars -= head.length;
+          continue;
+        }
+        if (text) {
+          applyEvent({ type: "delta", delta: text });
+          text = "";
+        }
+        applyEvent(head);
+      }
+      if (text) {
+        applyEvent({ type: "delta", delta: text });
+      }
+      queuedChars = 0;
+      flushing = false;
+      settle();
+    },
     flush() {
       ended = true;
+      flushing = true;
       if (raf) {
         cancelAnimationFrame(raf);
         raf = 0;
@@ -1290,13 +1563,93 @@ const createStreamPacer = (apply) => {
       lastFrame = 0;
       carry = 0;
       applyAll();
+      flushing = false;
       settle();
     },
   };
 };
 
+const UI_FONTS = [
+  { id: "Geist", stack: '"Geist", system-ui, sans-serif' },
+  { id: "Inter", stack: '"Inter", system-ui, sans-serif' },
+  { id: "System UI", stack: 'system-ui, "Segoe UI", sans-serif' },
+  { id: "Segoe UI", stack: '"Segoe UI", system-ui, sans-serif' },
+  { id: "Roboto", stack: '"Roboto", system-ui, sans-serif' },
+  { id: "Open Sans", stack: '"Open Sans", system-ui, sans-serif' },
+  { id: "Lato", stack: '"Lato", system-ui, sans-serif' },
+  { id: "Montserrat", stack: '"Montserrat", system-ui, sans-serif' },
+  { id: "Poppins", stack: '"Poppins", system-ui, sans-serif' },
+  { id: "Nunito", stack: '"Nunito", system-ui, sans-serif' },
+  { id: "Work Sans", stack: '"Work Sans", system-ui, sans-serif' },
+  { id: "DM Sans", stack: '"DM Sans", system-ui, sans-serif' },
+  { id: "Manrope", stack: '"Manrope", system-ui, sans-serif' },
+  { id: "IBM Plex Sans", stack: '"IBM Plex Sans", system-ui, sans-serif' },
+  { id: "Rubik", stack: '"Rubik", system-ui, sans-serif' },
+  { id: "Figtree", stack: '"Figtree", system-ui, sans-serif' },
+  { id: "Georgia", stack: 'Georgia, "Times New Roman", serif' },
+];
+
+const MONO_FONTS = [
+  { id: "JetBrains Mono", stack: '"JetBrains Mono", ui-monospace, monospace' },
+  { id: "Fira Code", stack: '"Fira Code", ui-monospace, monospace' },
+  { id: "Source Code Pro", stack: '"Source Code Pro", ui-monospace, monospace' },
+  { id: "IBM Plex Mono", stack: '"IBM Plex Mono", ui-monospace, monospace' },
+  { id: "Roboto Mono", stack: '"Roboto Mono", ui-monospace, monospace' },
+  { id: "Space Mono", stack: '"Space Mono", ui-monospace, monospace' },
+  { id: "Cascadia Code", stack: '"Cascadia Code", "Cascadia Mono", ui-monospace, monospace' },
+  { id: "Consolas", stack: 'Consolas, ui-monospace, monospace' },
+  { id: "Courier New", stack: '"Courier New", monospace' },
+];
+
+const THEME_PRESETS = [
+  { id: "vantheax", label: "VantheaX", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
+  { id: "vercel", label: "Vercel", accent: "#006efe", surfaceApp: "#111111", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
+  { id: "dracula", label: "Dracula", accent: "#bd93f9", surfaceApp: "#343746", surfaceSidebar: "#21222c", surfaceChat: "#282a36", text: "#f8f8f2" },
+  { id: "nord", label: "Nord", accent: "#88c0d0", surfaceApp: "#3b4252", surfaceSidebar: "#2e3440", surfaceChat: "#2e3440", text: "#eceff4" },
+  { id: "catppuccin", label: "Catppuccin", accent: "#cba6f7", surfaceApp: "#181825", surfaceSidebar: "#11111b", surfaceChat: "#1e1e2e", text: "#cdd6f4" },
+  { id: "gruvbox", label: "Gruvbox", accent: "#fabd2f", surfaceApp: "#3c3836", surfaceSidebar: "#282828", surfaceChat: "#1d2021", text: "#ebdbb2" },
+  { id: "rosepine", label: "Rose Pine", accent: "#ebbcba", surfaceApp: "#26233a", surfaceSidebar: "#191724", surfaceChat: "#1f1d2e", text: "#e0def4" },
+  { id: "onedark", label: "One Dark", accent: "#61afef", surfaceApp: "#21252b", surfaceSidebar: "#1b1f24", surfaceChat: "#282c34", text: "#c8cdd5" },
+  { id: "github", label: "GitHub", accent: "#2f81f7", surfaceApp: "#161b22", surfaceSidebar: "#0d1117", surfaceChat: "#0d1117", text: "#e6edf3" },
+  { id: "everforest", label: "Everforest", accent: "#a7c080", surfaceApp: "#2d353b", surfaceSidebar: "#232a2e", surfaceChat: "#2b3339", text: "#d3c6aa" },
+  { id: "monokai", label: "Monokai", accent: "#a6e22e", surfaceApp: "#3e3d32", surfaceSidebar: "#22231c", surfaceChat: "#272822", text: "#f8f8f2" },
+  { id: "tokyonight", label: "Tokyo Night", accent: "#7aa2f7", surfaceApp: "#1f2335", surfaceSidebar: "#16161e", surfaceChat: "#1a1b26", text: "#c0caf5" },
+  { id: "solarized", label: "Solarized", accent: "#268bd2", surfaceApp: "#073642", surfaceSidebar: "#002b36", surfaceChat: "#00252e", text: "#93a1a1" },
+  { id: "carbon", label: "Carbon", accent: "#78a9ff", surfaceApp: "#1c1c1c", surfaceSidebar: "#161616", surfaceChat: "#0b0b0b", text: "#e6e6e6" },
+];
+
+const DEFAULT_THEME = { preset: "vantheax", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed", fontUi: "Open Sans", fontMono: "JetBrains Mono", contrast: 19 };
+
+const uiFontStack = (id) => (UI_FONTS.find((f) => f.id === id) || UI_FONTS[0]).stack;
+const monoFontStack = (id) => (MONO_FONTS.find((f) => f.id === id) || MONO_FONTS[0]).stack;
+
+const themeVars = (input) => {
+  const t = { ...DEFAULT_THEME, ...(input || {}) };
+  const c = Math.max(0, Math.min(100, Number(t.contrast) || 0));
+  const m = 0.5 + c / 100;
+  return {
+    "--surface-app": t.surfaceApp,
+    "--surface-sidebar": t.surfaceSidebar,
+    "--surface-chat": t.surfaceChat,
+    "--text": t.text,
+    "--accent": t.accent,
+    "--font-ui": uiFontStack(t.fontUi),
+    "--font-mono": monoFontStack(t.fontMono),
+    "--elev-2": (3.5 * m).toFixed(2) + "%",
+    "--elev-3": (9 * m).toFixed(2) + "%",
+  };
+};
+
+const applyThemeToRoot = (input) => {
+  const root = document.documentElement;
+  const vars = themeVars(input);
+  for (const key of Object.keys(vars)) {
+    root.style.setProperty(key, vars[key]);
+  }
+};
+
 const App = () => {
-  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, narrator: { enabled: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" } });
+  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, narrator: { enabled: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }, theme: DEFAULT_THEME });
   const [models, setModels] = useState([]);
   const [projectPath, setProjectPath] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
@@ -1310,7 +1663,6 @@ const App = () => {
   const [termWidth, setTermWidth] = useState(() => Math.round((typeof window !== "undefined" ? window.innerWidth : 1280) * 0.42));
   const termSeq = useRef(0);
   const termCloseTimer = useRef(null);
-  const [contextUsage, setContextUsage] = useState(null);
   const [pendingCompact, setPendingCompact] = useState(null);
   const [compressing, setCompressing] = useState(false);
   const [projectIndex, setProjectIndex] = useState(emptyIndex);
@@ -1354,7 +1706,6 @@ const App = () => {
   const activeRequestRef = useRef(null);
   const activeMsgRef = useRef(null);
   const messagesRef = useRef(null);
-  const contextStampRef = useRef(-1);
   const compactingRef = useRef(false);
   const pacerRef = useRef(null);
 
@@ -1393,6 +1744,10 @@ const App = () => {
   }, [messages]);
   const currentModel = useMemo(() => models.find((model) => model.id === settings.model) || models[0], [models, settings.model]);
   LANG = settings.language || "en";
+
+  useEffect(() => {
+    applyThemeToRoot(settings.theme);
+  }, [settings.theme]);
 
   useEffect(() => {
     const init = async () => {
@@ -1928,32 +2283,36 @@ const App = () => {
     setResendText(text);
   };
 
-  const refreshContextUsage = async () => {
-    const chat = activeChat;
+  const getSnapshotPayload = (chat, message = "") => {
+    const source = chat?.messages || messages;
     const start = chat?.summaryCount || 0;
-    const fullLen = (chat?.messages || messages).length;
-    const eff = (chat?.messages || messages).slice(start);
+    const effective = source.slice(start);
+    return {
+      projectPath,
+      workspaceName: chat?.workspaceName || "",
+      model: settings.model,
+      effort: settings.effort,
+      mode: settings.mode,
+      webSearchEnabled: Boolean(settings.webSearch?.enabled && settings.hasTavilyKey),
+      planMode,
+      goalMode,
+      goal: goalText,
+      message,
+      summary: chat?.summary || "",
+      history: cleanHistory(effective),
+      readPaths: collectReadPaths(effective),
+    };
+  };
+
+  const requestContextSnapshot = async (chat = activeChat) => {
+    const chatId = chat?.id || "";
+    const ticket = contextUsageStore.startSnapshot(chatId);
     try {
-      const usage = await api.estimateContext({
-        projectPath,
-        workspaceName: chat?.workspaceName || "",
-        model: settings.model,
-        effort: settings.effort,
-        mode: settings.mode,
-        webSearchEnabled: Boolean(settings.webSearch?.enabled && settings.hasTavilyKey),
-        planMode,
-        goalMode,
-        goal: goalText,
-        message: "",
-        summary: chat?.summary || "",
-        history: cleanHistory(eff),
-        readPaths: collectReadPaths(eff),
-      });
-      if (usage && !usage.error) {
-        setContextUsage(usage);
-        contextStampRef.current = fullLen;
-      }
+      const usage = await api.getContextSnapshot(getSnapshotPayload(chat));
+      contextUsageStore.acceptSnapshot(ticket, usage);
+      return usage;
     } catch {}
+    return null;
   };
 
   const compactChatNow = async (chat, msgs, start) => {
@@ -1990,8 +2349,8 @@ const App = () => {
     compactingRef.current = true;
     setCompressing(true);
     try {
-      await compactChatNow(chat, msgs, start);
-      refreshContextUsage();
+      const result = await compactChatNow(chat, msgs, start);
+      await requestContextSnapshot(result.changed ? { ...chat, summary: result.summary, summaryCount: result.summaryCount } : chat);
     } finally {
       setCompressing(false);
       compactingRef.current = false;
@@ -2009,9 +2368,6 @@ const App = () => {
 
   const openRightPanel = (view) => {
     setRightPanel(view);
-    if (view === "context") {
-      refreshContextUsage();
-    }
   };
 
   const addTermTab = () => {
@@ -2105,10 +2461,28 @@ const App = () => {
   }, [terminalOpen, sidebarCollapsed]);
 
   useEffect(() => {
+    const chatId = activeChat?.id || "";
+    contextUsageStore.activate(chatId);
     if (!busy) {
-      refreshContextUsage();
+      requestContextSnapshot(activeChat);
     }
-  }, [activeChatId, busy]);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!busy) {
+      requestContextSnapshot(activeChat);
+    }
+  }, [projectPath, settings.model, settings.effort, settings.mode, settings.webSearch?.enabled, settings.hasTavilyKey, settings.memory?.enabled, settings.personality, settings.customInstructions, planMode, goalMode, goalText]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (!activeRequestRef.current) {
+        requestContextSnapshot(activeChat);
+      }
+    };
+    window.addEventListener("vantheax:context-changed", refresh);
+    return () => window.removeEventListener("vantheax:context-changed", refresh);
+  }, [activeChatId, projectPath, settings.model, settings.effort, settings.mode, planMode, goalMode, goalText]);
 
   useEffect(() => {
     if (!busy && pendingCompact) {
@@ -2218,6 +2592,7 @@ const App = () => {
     const requestId = crypto.randomUUID();
     activeRequestRef.current = requestId;
     activeMsgRef.current = { chatId: chat.id, assistantId };
+    contextUsageStore.begin(chat.id, requestId);
     setActiveChatId(chat.id);
     updateChats((current) => {
       const exists = current.some((item) => item.id === chat.id);
@@ -2243,12 +2618,12 @@ const App = () => {
     const outgoing = userMessage.content + (savedImage ? visualNoteFor({ name: savedImage.name, analysis: imageAnalysis }) : "");
     let effSummary = chat.summary || "";
     let effStart = chat.summaryCount || 0;
-    const ctxBudget = (contextUsage && contextUsage.budget) || 512000;
-    const projected = (contextUsage?.total || 0) + estTokens(userMessage.content);
-    const usageFresh = contextUsage && contextStampRef.current === previousMessages.length;
-    if (!usageFresh || projected >= 0.85 * ctxBudget) {
+    const currentUsage = contextUsageStore.getUsage();
+    const ctxBudget = currentUsage?.budget || 512000;
+    const projected = (currentUsage?.total || 0) + estTokens(outgoing);
+    if (!currentUsage || projected >= 0.85 * ctxBudget) {
       try {
-        const usage = await api.estimateContext({
+        const usage = await api.getContextSnapshot({
           projectPath,
           workspaceName,
           model: settings.model,
@@ -2278,13 +2653,12 @@ const App = () => {
       } catch {}
     }
     if (activeRequestRef.current !== requestId) {
+      contextUsageStore.end(requestId);
+      requestContextSnapshot(activeChat);
       return;
     }
     const applyStreamEvent = (event) => {
       if (event.type === "delta") {
-        if (event.delta) {
-          narrationStore.applyDelta(requestId);
-        }
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
           if (message.id !== assistantId) {
             return message;
@@ -2336,7 +2710,7 @@ const App = () => {
         }
       }
     };
-    const pacer = createStreamPacer(applyStreamEvent);
+    const pacer = createStreamPacer(applyStreamEvent, () => narrationStore.handoffDelta(requestId));
     pacerRef.current = pacer;
     narrationStore.begin(requestId);
     let sawTool = false;
@@ -2361,9 +2735,7 @@ const App = () => {
         readPaths: collectReadPaths(previousMessages.slice(effStart)),
       }, (event) => {
         if (event.type === "context") {
-          if (event.usage) {
-            setContextUsage(event.usage);
-          }
+          contextUsageStore.acceptEvent(event);
           return;
         }
         if (event.type === "narration") {
@@ -2378,7 +2750,7 @@ const App = () => {
       if (sawTool) {
         await pacer.finish();
       } else {
-        pacer.flush();
+        await pacer.flushAfterGate();
       }
       updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => (message.id === assistantId && !message.cancelled) ? { ...message, content: result.content || message.content, tools: result.tools || message.tools || [], done: true, workMs: message.workMs || (Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() } : item));
       if (settings.memory?.enabled && result && result.content) {
@@ -2392,16 +2764,19 @@ const App = () => {
         setStatus(t("status.ready"));
       }
     } catch (error) {
-      pacer.flush();
       narrationStore.reset(requestId);
+      pacer.flush();
       if (activeRequestRef.current === requestId) {
         const clean = String(error?.message || "").replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, "") || "The turn failed.";
-        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: clean, error: true, tools: [], segments: [], done: true } : message), updatedAt: new Date().toISOString() } : item));
+        const failedMessages = nextMessages.map((message) => message.id === assistantId ? { ...message, content: clean, error: true, tools: [], segments: [], done: true } : message);
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: failedMessages, updatedAt: new Date().toISOString() } : item));
+        contextUsageStore.end(requestId);
+        requestContextSnapshot({ ...chat, messages: failedMessages });
         setStatus(t("status.failed"));
       }
     } finally {
-      pacer.flush();
       narrationStore.reset(requestId);
+      pacer.flush();
       if (pacerRef.current === pacer) {
         pacerRef.current = null;
       }
@@ -2416,8 +2791,8 @@ const App = () => {
   const stopGeneration = () => {
     const active = activeMsgRef.current;
     const stoppedId = activeRequestRef.current;
-    pacerRef.current?.flush();
     narrationStore.reset(stoppedId);
+    pacerRef.current?.flush();
     if (stoppedId) {
       api.cancelStream(stoppedId);
     }
@@ -2480,7 +2855,9 @@ const App = () => {
     try {
       const res = await api.undoTurn(message.id);
       if (res && res.ok) {
-        updateChats((current) => current.map((chat) => chat.id === activeChatId ? { ...chat, messages: chat.messages.map((m) => m.id === message.id ? { ...m, reverted: true } : m) } : chat));
+        const revertedMessages = (activeChat?.messages || []).map((item) => item.id === message.id ? { ...item, reverted: true } : item);
+        updateChats((current) => current.map((chat) => chat.id === activeChatId ? { ...chat, messages: revertedMessages } : chat));
+        requestContextSnapshot({ ...activeChat, messages: revertedMessages });
         if (projectPath) {
           refreshProject(projectPath);
         }
@@ -2613,13 +2990,13 @@ const App = () => {
 
         <main className={messages.length ? "chat-panel has-messages" : "chat-panel is-empty"}>
           <button className={terminalOpen ? "terminal-toggle is-on" : "terminal-toggle"} onClick={toggleTerminal} title={t("terminal.open")}>
-            <Terminal size={16} />
+            <Terminal size={14} />
           </button>
           <button className="root-open-button" onClick={() => api.openRoot(projectPath, activeChat?.workspaceName || "")} title={t("panels.openRoot")}>
-            <ListTreeIcon size={16} />
+            <ListTreeIcon size={14} />
           </button>
-          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} usage={contextUsage} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
-          <ContextPanel usage={contextUsage} open={rightPanel === "context"} onCompact={requestCompact} pendingCompact={pendingCompact} />
+          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
+          <ContextPanel open={rightPanel === "context"} onCompact={requestCompact} pendingCompact={pendingCompact} />
           <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={rightPanel === "tasks"} />
           {messages.length > 0 && (
             <header className="chat-header">
@@ -2759,7 +3136,7 @@ const App = () => {
         const leaving = patch.enabled === false && models.find((item) => item.id === settings.model)?.apiProvider === "nvidia";
         const fallback = models.find((item) => item.apiProvider !== "nvidia");
         persistSettings(leaving && fallback ? { nvidia: patch, model: fallback.id, effort: fallback.defaultEffort || "" } : { nvidia: patch });
-      }} onSaveNvidiaKey={(k) => persistSettings({ nvidiaKeyPlain: k })} />}
+      }} onSaveNvidiaKey={(k) => persistSettings({ nvidiaKeyPlain: k })} theme={{ ...DEFAULT_THEME, ...(settings.theme || {}) }} onThemeChange={(patch) => persistSettings({ theme: { ...DEFAULT_THEME, ...(settings.theme || {}), ...patch } })} />}
     </div>
   );
 };
@@ -2986,6 +3363,20 @@ const ShapesIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const SunIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2" />
+    <path d="M12 20v2" />
+    <path d="m4.93 4.93 1.41 1.41" />
+    <path d="m17.66 17.66 1.41 1.41" />
+    <path d="M2 12h2" />
+    <path d="M20 12h2" />
+    <path d="m6.34 17.66-1.41 1.41" />
+    <path d="m19.07 4.93-1.41 1.41" />
+  </svg>
+);
+
 const FileDiffIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <rect x="4" y="4" width="16" height="16" rx="3" />
@@ -3013,6 +3404,14 @@ const SquareTerminalIcon = ({ size = 24, ...rest }) => (
     <path d="m7 11 2-2-2-2" />
     <path d="M11 13h4" />
     <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+  </svg>
+);
+
+const WorkflowIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <rect width="8" height="8" x="3" y="3" rx="2" />
+    <path d="M7 11v4a2 2 0 0 0 2 2h4" />
+    <rect width="8" height="8" x="13" y="13" rx="2" />
   </svg>
 );
 
@@ -3151,7 +3550,14 @@ const ListTreeIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
-const PanelSwitch = ({ open, active, usage, todos, onToggle, onPick }) => {
+const LayoutDashboardIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" />
+  </svg>
+);
+
+const PanelSwitch = ({ open, active, todos, onToggle, onPick }) => {
+  const usage = useContextUsage();
   const budget = usage?.budget || 512000;
   const total = usage?.total || 0;
   const pct = budget > 0 ? Math.min(1, total / budget) : 0;
@@ -3159,14 +3565,14 @@ const PanelSwitch = ({ open, active, usage, todos, onToggle, onPick }) => {
   return (
     <div className="panel-switch">
       <button className={open || active ? "panel-switch-button is-on" : "panel-switch-button"} onClick={onToggle} title={t("panels.title")}>
-        <MoreVertical size={17} />
+        <MoreVertical size={14} />
       </button>
       <div className={open ? "panel-menu open" : "panel-menu"}>
         <button className={active === "context" ? "brand-menu-row is-active" : "brand-menu-row"} onClick={() => onPick("context")}>
           <span className="brand-menu-icon"><ContextRing pct={pct} /></span>
           <span className="brand-menu-text">
             <span className="brand-menu-title">{t("context.title")}</span>
-            <span className="brand-menu-desc">{formatTokens(total)} / {formatTokens(budget)}</span>
+            <span className="brand-menu-desc">{usage ? formatTokens(total) : "…"} / {formatTokens(budget)}</span>
           </span>
         </button>
         <button className={active === "tasks" ? "brand-menu-row is-active" : "brand-menu-row"} onClick={() => onPick("tasks")}>
@@ -3205,6 +3611,14 @@ const xtermTheme = {
   brightWhite: "#f3eee8",
 };
 
+const readCssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const buildXtermTheme = () => {
+  const bg = readCssVar("--surface-terminal") || xtermTheme.background;
+  const fg = readCssVar("--text") || xtermTheme.foreground;
+  return { ...xtermTheme, background: bg, foreground: fg, cursor: fg, cursorAccent: bg, black: bg };
+};
+
 const TerminalView = ({ tabId, active, projectPath, workspaceName }) => {
   const holderRef = useRef(null);
   const termRef = useRef(null);
@@ -3213,11 +3627,11 @@ const TerminalView = ({ tabId, active, projectPath, workspaceName }) => {
   useEffect(() => {
     const term = new XTerm({
       fontSize: 13,
-      // concrete stack, no CSS var: xterm measures glyph width on a canvas and cannot resolve var(), which collapses to a proportional fallback and spaces every character out
-      fontFamily: '"JetBrains Mono", "Cascadia Mono", Consolas, "Courier New", ui-monospace, monospace',
+      // resolved --font-mono value (a concrete stack); xterm measures on a canvas and cannot resolve a literal var(), which would collapse to a proportional fallback
+      fontFamily: readCssVar("--font-mono") || '"JetBrains Mono", "Cascadia Mono", Consolas, "Courier New", ui-monospace, monospace',
       letterSpacing: 0,
       lineHeight: 1.15,
-      theme: xtermTheme,
+      theme: buildXtermTheme(),
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: true,
@@ -3338,7 +3752,8 @@ const TerminalPanel = ({ tabs, activeId, full, projectPath, workspaceName, onNew
   </aside>
 );
 
-const ContextPanel = ({ usage, open, onCompact, pendingCompact }) => {
+const ContextPanel = ({ open, onCompact, pendingCompact }) => {
+  const usage = useContextUsage();
   const budget = usage?.budget || 512000;
   const total = usage?.total || 0;
   const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : 0;
@@ -3348,7 +3763,7 @@ const ContextPanel = ({ usage, open, onCompact, pendingCompact }) => {
       <div className="context-row context-total">
         <div className="context-row-head">
           <span className="context-row-label">{t("context.total")}</span>
-          <span className="context-row-value">{formatTokens(total)} / {formatTokens(budget)} · {pct}%</span>
+          <span className="context-row-value">{usage ? `${formatTokens(total)} / ${formatTokens(budget)} · ${pct}%` : `… / ${formatTokens(budget)}`}</span>
         </div>
         <div className="context-bar"><span className="context-bar-fill" style={{ width: `${pct}%` }} /></div>
       </div>
@@ -3358,7 +3773,7 @@ const ContextPanel = ({ usage, open, onCompact, pendingCompact }) => {
           <li className="context-row" key={row.key}>
             <div className="context-row-head">
               <span className="context-row-label">{t(`context.cat.${row.key}`)}</span>
-              <span className="context-row-value">{formatTokens(row.value)}</span>
+              <span className="context-row-value">{usage ? formatTokens(row.value) : "…"}</span>
             </div>
             <div className="context-bar"><span className="context-bar-fill" style={{ width: `${budget > 0 ? Math.min(100, (row.value / budget) * 100) : 0}%` }} /></div>
           </li>
@@ -3638,6 +4053,9 @@ const clusterKind = (tool) => {
   if (tool.name === "read_file" && result.path) {
     return "reads";
   }
+  if ((tool.name || "").startsWith("mcp__") || result.mcp) {
+    return "mcp";
+  }
   return null;
 };
 
@@ -3746,8 +4164,12 @@ const ClusterRow = ({ tool }) => {
 };
 
 const CommandGroup = ({ tools, kind }) => {
-  const Icon = kind === "commands" ? SquareTerminalIcon : FolderSearchIcon;
-  const label = kind === "commands" ? t("cluster.commands", { n: tools.length }) : t("cluster.reads", { n: tools.length });
+  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : FolderSearchIcon;
+  const label = kind === "commands"
+    ? t("cluster.commands", { n: tools.length })
+    : kind === "mcp"
+      ? t("cluster.mcp", { n: tools.length })
+      : t("cluster.reads", { n: tools.length });
   return (
     <details className="cmd-group">
       <summary>
@@ -3767,6 +4189,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
   const isMcp = Boolean(result.mcp);
   const isWrite = Boolean(result.write);
   const isAddMcp = Boolean(result.addMcp);
+  const isMemory = Boolean(result.memory);
   const command = result.command || tool.args?.command || "";
   const tier = result.mcpTier || result.tier || "";
   const addLine = isAddMcp ? `${result.mcpAddName}  →  ${result.mcpAddConfig?.command || ""} ${(result.mcpAddConfig?.args || []).join(" ")}`.trim() : "";
@@ -3817,7 +4240,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
     const opt = extras.find((entry) => optionKey(entry) === choice);
     onResolve({ approved: true, stickyGrant: opt && typeof opt === "object" ? { type: opt.type } : { type: choice } });
   };
-  const question = isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand")));
+  const question = isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMemory ? t(result.memoryAction === "delete" ? "approval.questionForget" : "approval.questionRemember") : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand"))));
   return (
     <div className="approval-form">
       <div className="approval-question">
@@ -3825,7 +4248,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
         <span>{question}</span>
         {tier && <span className={`risk-badge risk-${tier}`}>{t(`risk.${tier}`)}</span>}
       </div>
-      <pre className="approval-command">{isAddMcp ? addLine : (command || target)}</pre>
+      <pre className="approval-command">{isAddMcp ? addLine : (isMemory ? (result.text || "") : (command || target))}</pre>
       {result.reason && <div className="approval-reason">{result.reason}</div>}
       <div className="approval-options">
         <label className={choice === "once" ? "approval-option is-active" : "approval-option"}>
@@ -3862,6 +4285,7 @@ const ToolStep = ({ tool }) => {
   const needsPermission = result.permissionRequired;
   const Icon = getToolIcon(tool.name);
   const label = getToolLabel(tool);
+  const isMemory = Boolean(result.memory);
   if (result.running) {
     const liveOut = `${result.stdout || ""}${result.stderr ? `\n${result.stderr}` : ""}`.trim();
     const command = tool.args?.command || result.command || "";
@@ -3888,9 +4312,9 @@ const ToolStep = ({ tool }) => {
     );
   }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
-  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier);
+  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory);
   return (
-    <details className={needsPermission ? "tool-step permission" : (result.error ? "tool-step failed" : "tool-step")}>
+    <details className={`${needsPermission ? "tool-step permission" : (result.error ? "tool-step failed" : "tool-step")}${isMemory ? " memory" : ""}`}>
       <summary>
         <span className="step-marker"><Icon size={14} /></span>
         <span className="step-label">{label}</span>
@@ -3908,6 +4332,10 @@ const ToolStep = ({ tool }) => {
         {result.stderr && <pre className="stderr">{result.stderr}</pre>}
         {result.content && <pre>{result.content}</pre>}
         {result.analysis && <pre>{result.analysis}</pre>}
+        {result.memory && result.text && <div className="tool-command">{result.text}</div>}
+        {Array.isArray(result.memories) && (result.memories.length
+          ? <pre>{result.memories.slice(0, 300).map((m) => `(${m.id}) ${m.text}`).join("\n")}</pre>
+          : <div className="tool-meta">{t("memory.none")}</div>)}
         {hasListing && ((result.directories?.length || result.files?.length)
           ? <pre>{[...(result.directories || []).map((e) => `${e.path || e}/`), ...(result.files || []).map((e) => e.path || e)].slice(0, 300).join("\n")}</pre>
           : <div className="tool-meta">{result.summary || "·"}</div>)}
@@ -4081,7 +4509,7 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
           if (block.kind === "edits") {
             return <EditGroup tools={block.tools} key={key} />;
           }
-          if (block.kind === "commands" || block.kind === "reads") {
+          if (block.kind === "commands" || block.kind === "reads" || block.kind === "mcp") {
             return block.tools.length === 1
               ? <ToolStep tool={block.tools[0]} key={key} />
               : <CommandGroup tools={block.tools} kind={block.kind} key={key} />;
@@ -4279,6 +4707,9 @@ const getToolIcon = (name = "") => {
   if (lower === "web_search") {
     return GlobeCheckIcon;
   }
+  if (lower === "remember" || lower === "forget" || lower === "list_memories") {
+    return LayoutDashboardIcon;
+  }
   if (lower.startsWith("mcp__") || lower === "add_mcp_server") {
     return Plug;
   }
@@ -4324,6 +4755,15 @@ const getToolLabel = (tool) => {
     const server = result.mcpServer || name.slice(5).split("__")[0];
     const mcpTool = result.mcpTool || name.slice(5).split("__").slice(1).join("__");
     return t("toollabel.mcp", { server, tool: mcpTool });
+  }
+  if (name === "remember") {
+    return t("toollabel.remember");
+  }
+  if (name === "forget") {
+    return t("toollabel.forget");
+  }
+  if (name === "list_memories") {
+    return t("toollabel.listMemories");
   }
   if (result.denied) {
     return t("toollabel.denied", { x: command || path || tool.name || "" });
@@ -4519,6 +4959,7 @@ const McpSettings = () => {
       await api.saveSettings({ mcpServers: next });
     } catch {}
     setTimeout(refresh, 700);
+    setTimeout(() => window.dispatchEvent(new Event("vantheax:context-changed")), 750);
   };
   const addServer = async () => {
     const name = form.name.trim();
@@ -4602,6 +5043,7 @@ const McpSettings = () => {
       if (Array.isArray(st)) {
         setStatus(st);
       }
+      window.dispatchEvent(new Event("vantheax:context-changed"));
     } catch {}
   };
   const setToolEnabled = async (server, tool, enabled) => {
@@ -4610,6 +5052,7 @@ const McpSettings = () => {
       if (Array.isArray(st)) {
         setStatus(st);
       }
+      window.dispatchEvent(new Event("vantheax:context-changed"));
     } catch {}
   };
   const toggleTrust = async (server) => {
@@ -4625,6 +5068,7 @@ const McpSettings = () => {
       if (Array.isArray(st)) {
         setStatus(st);
       }
+      window.dispatchEvent(new Event("vantheax:context-changed"));
     } catch {}
   };
   const statusFor = (name) => status.find((s) => s.name === name);
@@ -4937,13 +5381,103 @@ const ModelEvalSettings = ({ config, hasKey, models, onChange, onSaveKey }) => {
   );
 };
 
-const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory, models, nvidia, hasNvidiaKey, onNvidiaChange, onSaveNvidiaKey }) => {
+const ThemeSelect = ({ value, options, onChange, swatch }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onDown = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const current = options.find((item) => item.id === value) || options[0];
+  return (
+    <div className="theme-select" ref={ref}>
+      <button type="button" className={open ? "theme-select-trigger is-open" : "theme-select-trigger"} onClick={() => setOpen(!open)} style={current && current.stack ? { fontFamily: current.stack } : undefined}>
+        {swatch && <span className="theme-swatch" style={{ background: swatch(current) }} />}
+        <span className="theme-select-value">{current ? (current.label || current.id) : ""}</span>
+        <ChevronDown size={15} />
+      </button>
+      {open && (
+        <div className="theme-select-menu">
+          {options.map((item) => (
+            <button type="button" key={item.id} className={item.id === value ? "theme-select-item is-active" : "theme-select-item"} onClick={() => { onChange(item.id); setOpen(false); }} style={item.stack ? { fontFamily: item.stack } : undefined}>
+              {swatch && <span className="theme-swatch" style={{ background: swatch(item) }} />}
+              <span className="theme-select-item-label">{item.label || item.id}</span>
+              {item.id === value && <Check size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DesignSettings = ({ theme, onChange }) => {
+  const t0 = { ...DEFAULT_THEME, ...(theme || {}) };
+  const applyPreset = (id) => {
+    const preset = THEME_PRESETS.find((item) => item.id === id);
+    if (!preset) {
+      return;
+    }
+    onChange({ preset: id, accent: preset.accent, surfaceApp: preset.surfaceApp, surfaceSidebar: preset.surfaceSidebar, surfaceChat: preset.surfaceChat, text: preset.text });
+  };
+  const setColor = (key, val) => onChange({ [key]: val, preset: "custom" });
+  const colorRow = (labelKey, key) => (
+    <div className="design-row">
+      <span className="design-row-label">{t(labelKey)}</span>
+      <label className="design-color">
+        <span className="design-color-hex">{String(t0[key]).toUpperCase()}</span>
+        <input type="color" value={t0[key]} onChange={(event) => setColor(key, event.target.value)} />
+      </label>
+    </div>
+  );
+  return (
+    <>
+      <div className="modal-title"><SunIcon size={19} />{t("settings.tabDesign")}</div>
+      <div className="design-row">
+        <span className="design-row-label">{t("design.preset")}</span>
+        <ThemeSelect value={t0.preset} options={THEME_PRESETS} onChange={applyPreset} swatch={(item) => (item ? item.accent : "transparent")} />
+      </div>
+      {colorRow("design.accent", "accent")}
+      {colorRow("design.sidebar", "surfaceSidebar")}
+      {colorRow("design.background", "surfaceChat")}
+      {colorRow("design.titlebar", "surfaceApp")}
+      {colorRow("design.text", "text")}
+      <div className="design-row">
+        <span className="design-row-label">{t("design.fontUi")}</span>
+        <ThemeSelect value={t0.fontUi} options={UI_FONTS} onChange={(id) => onChange({ fontUi: id })} />
+      </div>
+      <div className="design-row">
+        <span className="design-row-label">{t("design.fontCode")}</span>
+        <ThemeSelect value={t0.fontMono} options={MONO_FONTS} onChange={(id) => onChange({ fontMono: id })} />
+      </div>
+      <div className="design-row">
+        <span className="design-row-label">{t("design.contrast")}</span>
+        <div className="design-slider-wrap">
+          <input type="range" className="web-slider" min="0" max="100" value={t0.contrast} onChange={(event) => onChange({ contrast: Number(event.target.value) })} style={{ background: `linear-gradient(to right, var(--accent-2) 0%, var(--accent-2) ${t0.contrast}%, rgba(255,255,255,.1) ${t0.contrast}%, rgba(255,255,255,.1) 100%)` }} />
+          <span className="web-slider-val">{t0.contrast}</span>
+        </div>
+      </div>
+      <button type="button" className="design-reset" onClick={() => onChange({ ...DEFAULT_THEME })}><Undo2 size={15} />{t("design.reset")}</button>
+    </>
+  );
+};
+
+const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory, models, nvidia, hasNvidiaKey, onNvidiaChange, onSaveNvidiaKey, theme, onThemeChange }) => {
   const [tab, setTab] = useState("general");
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="settings-modal tabbed" onMouseDown={(event) => event.stopPropagation()}>
         <div className="settings-tabs">
           <button className={tab === "general" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("general")}><Settings size={15} /><span>{t("settings.tabGeneral")}</span></button>
+          <button className={tab === "design" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("design")}><SunIcon size={15} /><span>{t("settings.tabDesign")}</span></button>
           <button className={tab === "mcp" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("mcp")}><Plug size={15} /><span>{t("settings.tabMcp")}</span></button>
           <button className={tab === "websearch" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("websearch")}><GlobeCheckIcon size={15} /><span>{t("settings.tabWebSearch")}</span></button>
           <button className={tab === "personalization" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("personalization")}><ShapesIcon size={15} /><span>{t("settings.tabPersonalization")}</span></button>
@@ -4972,6 +5506,8 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
             </>
           ) : tab === "websearch" ? (
             <WebSearchSettings config={webSearch} hasKey={hasTavilyKey} onChange={onWebChange} onSaveKey={onSaveTavilyKey} />
+          ) : tab === "design" ? (
+            <DesignSettings theme={theme} onChange={onThemeChange} />
           ) : tab === "modeleval" ? (
             <ModelEvalSettings config={nvidia} hasKey={hasNvidiaKey} models={models} onChange={onNvidiaChange} onSaveKey={onSaveNvidiaKey} />
           ) : (

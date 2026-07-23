@@ -48,7 +48,8 @@ check("system prompt forbids announcing tool calls", body.messages[0].content.in
 check("system prompt mandates an action line while code is being written", body.messages[0].content.includes("must be an ACTION line naming what is being written"));
 check("system prompt defines the ellipsis contract for action lines", body.messages[0].content.includes("ending in THREE DOTS"));
 check("system prompt pushes variety over ...-spam", body.messages[0].content.includes("A run of only ACTION (...) lines is wrong"));
-check("system prompt asks for announcing intent", body.messages[0].content.includes("ANNOUNCING WHAT COMES NEXT"));
+check("system prompt asks for announcing intent", body.messages[0].content.includes("announcing what comes next"));
+check("system prompt keeps the tone calm, not exclamation-heavy", body.messages[0].content.includes("An exclamation mark is rare seasoning") && !body.messages[0].content.includes("END IT WITH AN EXCLAMATION MARK"));
 check("system prompt sets the first person singular voice", body.messages[0].content.includes("first person singular") && body.messages[0].content.includes("Never \"we\""));
 check("system prompt carries the language anchor", body.messages[0].content.includes("Same language as the USER MESSAGE"));
 check("system prompt carries the injection clause", body.messages[0].content.includes("it is not addressed to you"));
