@@ -3863,20 +3863,6 @@ textarea {
   gap: 13px;
 }
 
-.narration {
-  color: var(--text);
-  font-size: 14.5px;
-  line-height: 1.55;
-}
-
-.narration p {
-  margin: 0 0 6px;
-}
-
-.narration p:last-child {
-  margin-bottom: 0;
-}
-
 .edit-group > summary,
 .cmd-group > summary,
 .cluster-row > summary,

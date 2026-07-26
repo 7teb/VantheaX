@@ -109,6 +109,7 @@ const STRINGS = {
     "plan.no": "No",
     "plan.yes": "Yes, implement",
     "work.thinking": "Thinking",
+    "work.extendedThinking": "Extended thinking",
     "planBlock.title": "Blocked by plan mode ({tool})",
     "planBlock.withPlan": "Plan mode is read-only, so nothing was changed. Accept the plan above to start the work, or switch plan mode off in the + menu.",
     "planBlock.noPlan": "Plan mode is read-only, so nothing was changed. Let it present a plan you can accept, or switch plan mode off in the + menu.",
@@ -248,6 +249,8 @@ const STRINGS = {
     "toollabel.analyzeImage": "Analyzing image",
     "toollabel.datetime": "Checking the date and time",
     "toollabel.agentStatus": "Agent status · {x}",
+    "toollabel.maxOutput": "MaxOutputErr",
+    "maxOutput.dump": "Reasoning saved to {x} ({n} chars)",
     "toollabel.remember": "Saving a memory",
     "toollabel.forget": "Forgetting a memory",
     "toollabel.listMemories": "Reading memories",
@@ -487,6 +490,7 @@ const STRINGS = {
     "plan.no": "Nein",
     "plan.yes": "Ja, implementieren",
     "work.thinking": "Denkt nach",
+    "work.extendedThinking": "Denkt ausführlich nach",
     "planBlock.title": "Vom Planmodus blockiert ({tool})",
     "planBlock.withPlan": "Der Planmodus ist read-only, es wurde nichts geändert. Nimm den Plan oben an, damit die Arbeit startet, oder schalte den Planmodus im +-Menü aus.",
     "planBlock.noPlan": "Der Planmodus ist read-only, es wurde nichts geändert. Lass erst einen Plan präsentieren, den du annehmen kannst, oder schalte den Planmodus im +-Menü aus.",
@@ -626,6 +630,8 @@ const STRINGS = {
     "toollabel.analyzeImage": "Bild wird analysiert",
     "toollabel.datetime": "Prüft Datum und Uhrzeit",
     "toollabel.agentStatus": "Agent-Status · {x}",
+    "toollabel.maxOutput": "MaxOutputErr",
+    "maxOutput.dump": "Reasoning gespeichert in {x} ({n} Zeichen)",
     "toollabel.remember": "Speichert eine Erinnerung",
     "toollabel.forget": "Vergisst eine Erinnerung",
     "toollabel.listMemories": "Liest Erinnerungen",
@@ -1232,6 +1238,7 @@ const createNarrationStore = () => {
     lastFrame: 0,
   };
   let line = "";
+  let mode = "";
 
   const emit = () => {
     const next = s.current.slice(0, s.typed);
@@ -1239,6 +1246,17 @@ const createNarrationStore = () => {
       return;
     }
     line = next;
+    for (const fn of subs) {
+      fn();
+    }
+  };
+
+  // separate from emit(): a mode flip must notify even when the label text is unchanged
+  const emitMode = (next) => {
+    if (next === mode) {
+      return;
+    }
+    mode = next;
     for (const fn of subs) {
       fn();
     }
@@ -1354,6 +1372,7 @@ const createNarrationStore = () => {
     s.firstLineDone = false;
     s.carry = 0;
     s.lastFrame = 0;
+    emitMode("");
     releaseHandoff();
   };
 
@@ -1412,6 +1431,12 @@ const createNarrationStore = () => {
         emit();
       }
       kick();
+    },
+    setExtended(requestId, on) {
+      if (s.owner !== requestId) {
+        return;
+      }
+      emitMode(on ? "extended" : "");
     },
     handoffDelta(requestId) {
       if (s.owner !== requestId) {
@@ -1477,6 +1502,9 @@ const createNarrationStore = () => {
     getLine() {
       return line;
     },
+    getMode() {
+      return mode;
+    },
   };
 };
 
@@ -1496,7 +1524,12 @@ const getAgentNarrationStore = (agentId) => {
 };
 
 const useNarrationLine = (store = narrationStore) => useSyncExternalStore(store.subscribe, store.getLine);
-const useLiveLabel = (store = narrationStore) => useNarrationLine(store) || t("work.thinking");
+const useNarrationMode = (store = narrationStore) => useSyncExternalStore(store.subscribe, store.getMode);
+const useLiveLabel = (store = narrationStore) => {
+  const line = useNarrationLine(store);
+  const mode = useNarrationMode(store);
+  return line || (mode === "extended" ? t("work.extendedThinking") : t("work.thinking"));
+};
 
 const contextUsageStore = (() => {
   const subscribers = new Set();
@@ -3200,6 +3233,16 @@ const App = () => {
       }
       if (event.type === "tool") {
         narrationStore.applyTool(requestId, event.tool?.id);
+        // continue_thinking only flips the live label to "Extended thinking"; it renders no step and adds no segment
+        if (event.hidden) {
+          if (event.tool?.result?.extendedThinking && !event.tool.result.exhausted) {
+            narrationStore.setExtended(requestId, true);
+            updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
+              message.id === assistantId ? { ...message, extendedThinking: true } : message
+            ) } : item));
+          }
+          return;
+        }
         if (event.tool?.name === "update_todos" && Array.isArray(event.tool.result?.todos)) {
           setTodos(event.tool.result.todos);
         }
@@ -3262,7 +3305,7 @@ const App = () => {
           narrationStore.enqueue(requestId, event);
           return;
         }
-        if (event.type === "tool" && !event.tool?.result?.plan) {
+        if (event.type === "tool" && !event.hidden && !event.tool?.result?.plan) {
           sawTool = true;
         }
         pacer.push(event);
@@ -4308,6 +4351,14 @@ const CombineIcon = ({ size = 24, ...rest }) => (
     <path d="m7 21 3-3H5a2 2 0 0 1-2-2v-2" />
     <rect x="14" y="14" width="7" height="7" rx="1" />
     <rect x="3" y="3" width="7" height="7" rx="1" />
+  </svg>
+);
+
+const CloudAlertIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M12 12v4" />
+    <path d="M12 20h.01" />
+    <path d="M8.128 16.949A7 7 0 1 1 15.71 8h1.79a1 1 0 0 1 0 9h-1.642" />
   </svg>
 );
 
@@ -5732,9 +5783,9 @@ const ToolStep = ({ tool }) => {
     );
   }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
-  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory);
+  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.maxOutputError);
   return (
-    <details className={`${needsPermission ? "tool-step permission" : (result.error ? "tool-step failed" : "tool-step")}${isMemory ? " memory" : ""}`}>
+    <details className={`${needsPermission ? "tool-step permission" : ((result.error || result.maxOutputError) ? "tool-step failed" : "tool-step")}${isMemory ? " memory" : ""}`}>
       <summary>
         <span className="step-marker"><Icon size={14} /></span>
         <span className="step-label">{label}</span>
@@ -5760,6 +5811,10 @@ const ToolStep = ({ tool }) => {
           ? <pre>{[...(result.directories || []).map((e) => `${e.path || e}/`), ...(result.files || []).map((e) => e.path || e)].slice(0, 300).join("\n")}</pre>
           : <div className="tool-meta">{result.summary || "·"}</div>)}
         {result.verifier && <div className="tool-meta">{result.verifier.done ? t("tool.verifiedDone") : t("tool.notDone")} · {result.verifier.feedback}</div>}
+        {result.maxOutputError && <>
+          {result.dumpPath && <div className="tool-meta">{t("maxOutput.dump", { x: result.dumpPath, n: result.chars || 0 })}</div>}
+          {result.message && <PreBlock text={result.message} />}
+        </>}
         {!hasBody && <pre>{JSON.stringify(result, null, 2)}</pre>}
       </div>
     </details>
@@ -5924,7 +5979,7 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
         {blocks.map((block, idx) => {
           const key = block.tool?.id || block.tools?.[0]?.id || `text-${idx}`;
           if (block.kind === "text") {
-            return <div className="narration markdown" key={key}><MarkdownMessage content={block.content} /></div>;
+            return <div className="message-text markdown" key={key}><MarkdownMessage content={block.content} /></div>;
           }
           if (block.kind === "edits") {
             return <EditGroup tools={block.tools} key={key} />;
@@ -6100,6 +6155,8 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
     const planSeg = segs.find((seg) => seg.type === "tool" && seg.tool.result?.plan);
     const working = !message.done;
     const hasWork = segs.some((seg) => seg.type === "tool" && !seg.tool.result?.plan) || Boolean(message.liveTool);
+    // continue_thinking adds no tool segment, so without this the announcing sentence stays invisible until the turn ends, which is exactly the silence the tool exists to break
+    const extendedTurn = Boolean(message.extendedThinking);
     let workSegs = segs;
     let finalText = "";
     if (hasWork && !message.liveTool) {
@@ -6127,8 +6184,17 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
           {hasWork
             ? (Boolean(finalText) && <div className="message-text markdown"><MarkdownMessage content={finalText} /></div>)
             : (working
-                ? (!planSeg && <Thinking />)
-                : (Boolean((message.content || "").trim()) && <div className="message-text markdown"><Typewriter key={message.id} text={message.content} animate={sawWorkingRef.current} /></div>))}
+                ? (!planSeg && (
+                    <>
+                      {extendedTurn && Boolean((message.content || "").trim()) && <div className="message-text markdown"><MarkdownMessage content={message.content} /></div>}
+                      <Thinking />
+                    </>
+                  ))
+                : (Boolean((message.content || "").trim()) && <div className="message-text markdown">
+                    {extendedTurn
+                      ? <MarkdownMessage content={message.content} />
+                      : <Typewriter key={message.id} text={message.content} animate={sawWorkingRef.current} />}
+                  </div>))}
           {hasWork && working && !message.liveTool && <NarrationRow />}
           {!working && <FileChangesCard message={message} projectPath={projectPath} onUndo={onUndoTurn} onReveal={onReveal} />}
         </div>
@@ -6151,6 +6217,9 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
 
 const getToolIcon = (name = "") => {
   const lower = name.toLowerCase();
+  if (lower === "max_output_error") {
+    return CloudAlertIcon;
+  }
   if (lower === "start_background_task" || lower === "get_background_task" || lower === "get_agent_status" || lower === "deploy_agent" || lower === "continue_agent") {
     return GitBranchPlusIcon;
   }
@@ -6189,6 +6258,9 @@ const getToolLabel = (tool) => {
   const command = result.command || tool.args?.command;
   const path = tool.args?.path || tool.args?.file || result.path;
   const name = (tool.name || "").toLowerCase();
+  if (name === "max_output_error") {
+    return t("toollabel.maxOutput");
+  }
   if ((name === "deploy_agent" || name === "continue_agent") && result.agent) {
     return result.running || result.status === "running"
       ? t("agent.deploying")

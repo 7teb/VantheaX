@@ -32,6 +32,7 @@ const estimateTokens = (text) => {
 };
 const maxGrepMatches = 5000;
 const maxToolRounds = 100;
+const maxExtendedThinking = 3;
 const maxCommands = 200;
 const maxOutputBytes = 8 * 1024 * 1024;
 const toolResultMaxTokens = 25000;
@@ -49,7 +50,8 @@ let agentSessionManager = null;
 let chatStore = null;
 let commandCount = 0;
 let toolCallSeq = 0;
-const sanitizeMessages = (messages) => (messages || []).map(({ finishReason, ...rest }) => rest);
+// reasoningText is carried out-of-band for the max-output dump and must never reach a provider
+const sanitizeMessages = (messages) => (messages || []).map(({ finishReason, reasoningText, ...rest }) => rest);
 
 // tool results re-enter body.messages every round, uncapped they get re-billed each round
 const capToolContent = (result) => {
@@ -1058,6 +1060,21 @@ const toolSpecs = [
   {
     type: "function",
     function: {
+      name: "continue_thinking",
+      description: "Take another full reasoning pass before you start working. Write ONE short sentence to the user first (that you can do it and are going to think it through), then call this in the SAME response. It runs no code, changes nothing, and reads nothing: it only gives you a fresh round to plan in, and the user sees 'Extended thinking' instead of 'Thinking' so a long pause does not look like a crash. ONLY for genuinely large work: designing a whole game, a whole framework or system architecture, a large multi-file refactor, or a real implementation plan. Also use it whenever the user explicitly asks you to think longer or plan first. NEVER for a small script, a few bug fixes, a single-file change, a question, or anything you could already start on. When the extra round is over, do the work. Do not call it twice in a row.",
+      parameters: {
+        type: "object",
+        properties: {
+          focus: { type: "string", description: "The one thing you will work through in this pass, e.g. 'the entity/component layout and the render loop'." },
+        },
+        required: ["focus"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "write_file",
       description: "Create a new file or overwrite an existing one with UTF-8 content. Path is project-relative. This actually writes the file.",
       parameters: {
@@ -1241,7 +1258,7 @@ const toolSpecs = [
   },
 ];
 
-const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "datetime", "list_memories", "get_background_task", "get_agent_status", "deploy_agent", "continue_agent"]);
+const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "datetime", "list_memories", "get_background_task", "get_agent_status", "deploy_agent", "continue_agent", "continue_thinking"]);
 const agentExploreToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "web_search"]);
 const agentWorkerToolNames = new Set([...agentExploreToolNames, "write_file", "replace_in_file", "run_command"]);
 
@@ -2307,6 +2324,19 @@ const runWebSearch = async (settings, args, onProgress, turnSignal) => {
   }
 };
 
+// per-turn counter so continue_thinking cannot loop; keyed by turnId, oldest pruned since turns never clean up after themselves
+const extendedThinkingCounts = new Map();
+
+const countExtendedThinking = (turnId) => {
+  const key = String(turnId || "");
+  const used = (extendedThinkingCounts.get(key) || 0) + 1;
+  extendedThinkingCounts.set(key, used);
+  while (extendedThinkingCounts.size > 200) {
+    extendedThinkingCounts.delete(extendedThinkingCounts.keys().next().value);
+  }
+  return used;
+};
+
 const executeTool = async (projectPath, index, toolCall, mode, settings, planMode, userContext = [], chatId, onProgress, turnId, visualContext = [], turnSignal = null, runtime = {}) => {
   const name = toolCall.function.name;
   const args = parseToolArguments(toolCall.function.arguments);
@@ -2358,6 +2388,23 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       planBlocked: true,
       blockedTool: name,
       error: "Plan mode is ON and it is read-only, so this was blocked and nothing happened. You cannot write files or run commands until the user leaves plan mode. Do NOT retry this or look for a workaround. Finish your investigation with the read tools and call present_plan, and in your reply tell the user plainly that you cannot make changes while plan mode is on: they either accept the plan you presented (the Accept button on the plan card, which turns plan mode off and starts the work) or switch plan mode off themselves in the composer menu.",
+    };
+  }
+  if (name === "continue_thinking") {
+    const focus = String(args.focus || "").slice(0, 400);
+    const pass = countExtendedThinking(turnId);
+    if (pass > maxExtendedThinking) {
+      return {
+        extendedThinking: true,
+        exhausted: true,
+        error: `Refused: you already took ${maxExtendedThinking} extra reasoning passes this turn, which is the limit. continue_thinking will keep failing for the rest of this turn, so do NOT call it again. Use what you have already planned and start the actual work now.`,
+      };
+    }
+    return {
+      extendedThinking: true,
+      focus,
+      pass,
+      note: `Extra reasoning pass ${pass} of ${maxExtendedThinking} granted. Nothing was executed. Think through ${focus || "the task"} properly now: the structure, the pieces and how they fit, the order to build them in, and what could go wrong. Then start the work. Do not call continue_thinking again unless the task genuinely changes shape.`,
     };
   }
   if (name === "datetime") {
@@ -2730,7 +2777,6 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     "Make every run_command SAY whether it worked instead of running silently. run_command captures the command's output and shows it to the user, so a command that performs an action but prints nothing leaves both of you blind to whether it actually did anything. This matters most for actions with no natural output: key sends and GUI automation (SendKeys), Start-Process / Stop-Process, Set-* / New-* / Remove-* on files, services, scheduled tasks or the registry, clipboard writes, and any fire-and-forget action. For those, do it all in the one command: first resolve and CHECK the precondition and fail loudly if it is missing (when you target a process or window, get it first and print a clear FAIL and stop if it is not running or has no main window), then perform the action, then print a short confirmation carrying the concrete proof (the target, pid, path, or a re-read of the state you changed). Prefer an explicit Write-Host 'OK: ...' or Write-Host 'FAIL: ...' over a bare command whose captured output is empty. Example: instead of a bare `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F9}')`, write `Add-Type -AssemblyName System.Windows.Forms; $p = Get-Process -Name ida -ErrorAction SilentlyContinue; if (-not $p -or $p.MainWindowHandle -eq 0) { Write-Host 'FAIL: ida not running or has no window'; return }; [System.Windows.Forms.SendKeys]::SendWait('%{F9}'); Write-Host ('OK: sent Alt+F9 to ida pid ' + $p.Id)`. A raw key send cannot be truly confirmed (it is only a button press), so at minimum prove the target existed and was focusable; for actions that CAN be verified (a file written, a registry value set, a process started or killed) re-check that state afterwards and print what you observed.",
     "ONLY edit files or run commands when the user EXPLICITLY asks you to make, build, fix, change, refactor, or implement something. If the user only asks you to READ, analyze, look at, review, summarize, or explain code, DO NOT edit anything and DO NOT run commands, just read what you need and answer in text. Never start implementing, integrating, or adding features the user did not ask for. When the user DOES ask for a change, actually do it via write_file or replace_in_file, never paste a code block as the fix; only tool calls change real files.",
     "Read the relevant files before editing them. Strongly prefer small, targeted replace_in_file edits. Do NOT rewrite an entire large file with write_file when targeted edits achieve the same result, rewriting a file of hundreds or thousands of lines is slow, expensive, and error-prone; use write_file only for genuinely new files or small files. Example: to remove comments from a file, use grep_files to find them and replace_in_file to delete each one, rather than rewriting the whole file. Keep edits minimal and focused.",
-    "Narrate as you work: right before each tool call, write ONE short, natural sentence saying what you are about to do and why (e.g. \"Let me check how the worker maps the error.\", \"Now I'll add the photo-post detection.\", \"Testing it against both links.\"). After an edit or command, a brief note on what happened. This running narration is shown to the user as your live thought process between steps, keep each line short, first person, no headers. Save the full structured summary for your final message once everything is done and tested.",
     "When the user reports a bug or something not behaving as expected, investigate the real code before answering, then explain it to them in plain language as you go: how you found it (which file, function, or symbol you looked at and what gave it away), what the actual root cause is (the specific mechanism, why the code does the wrong thing, what triggers it), and how your fix targets that cause. Weave this into your short narration and final message as a clear, compact explanation a person can follow, NOT a long verbatim code dump or a hundred-line quote. The point is that the user understands what you see and how the bug actually works, so they learn from it, quote only the few key lines that matter.",
     "TASK LIST IS MANDATORY FOR CODING WORK. Whenever the user asks you to build, write, implement, fix, refactor, migrate, or change anything in code, you MUST call update_todos BEFORE your first write_file, replace_in_file, or build/test command, with a short checklist of the concrete steps you are about to take (each {text, done:false}). Then call it again to flip a step to done:true the moment that step is actually finished. This is not optional and not something to decide case by case: the user watches that list in the Tasks panel, it is the only view they have of your progress while you work, and starting to edit files without it is a failure even if the code turns out fine. The only requests that may skip it are pure read/analyze/explain answers that change no code, and a single trivial one-step edit. Rules for the list: every step starts as done:false, never create a step that is already done:true, never flip a step to done:true before you have really completed it with a real edit or command, keep the steps concrete and few, and if the plan changes mid-task call update_todos again with the corrected list instead of silently drifting from it.",
     "Never claim you ran tests or commands you did not actually run. After changing files, briefly say which files you changed and how to test.",
@@ -2747,10 +2793,14 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   ];
   lines.push(personalityTone[payload.personality] || personalityTone.pragmatic);
   if (!payload.agentSession) {
+    lines.push("For genuinely LARGE work you may take an extra reasoning pass before starting, with the continue_thinking tool. Use it when the task is designing a whole game, a whole framework or system architecture, a large multi-file refactor, or a real implementation plan, and whenever the user explicitly asks you to think longer or plan it out first. Do NOT use it for a small script, a few bug fixes, a single-file change, a question, or anything you can already start on: reaching for it on small work wastes the user's time. The shape is always the same: write ONE short sentence to the user saying you can do it and are going to think it through, then call continue_thinking in that SAME response with a concrete focus. It executes nothing and reads nothing, it only buys you another full round to plan in, and it shows the user 'Extended thinking' so a long pause does not look like a crash. Use the extra round properly (structure, the pieces and how they fit, the build order, what could go wrong), then do the work. It is capped per turn, never call it twice in a row, and never use it to stall instead of working. In plan mode it does not replace present_plan: think first if the design is large, then still present the plan with present_plan.");
     lines.push("You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Deploy and continue calls return immediately after launch, so you can launch multiple useful agents or continue other independent work without waiting. Never poll: the app sends you an automatic internal event with the final report when an agent finishes. Sub-agents cannot talk to the user or deploy agents themselves.");
     if (Array.isArray(payload.agentModels) && payload.agentModels.length) {
       lines.push(`Available agent models in the current UI: ${payload.agentModels.join(", ")}.`);
     }
+  }
+  if (payload.memoryEnabled && !payload.agentSession) {
+    lines.push("WHEN A MISS WAS PREVENTABLE BY A STANDING RULE, PROPOSE REMEMBERING IT. When the user corrects you, or you catch it yourself, and the miss was about HOW you worked rather than a wrong line of code, apply one test before anything else: would ONE durable sentence, sitting in your memory at the start of an unrelated future chat, have prevented this exact miss? If yes, finish the actual fix first, then in that same response state the lesson in one flat sentence and call remember with it. remember always asks the user for approval and shows them the exact text, so that proposal IS the offer: do not also ask \"should I remember this?\" in prose, and do not treat it as saved until the tool result says so. If the user declines, drop it and never propose that fact again. Misses that PASS the test are workflow, tooling and environment ones: not looking something up with web_search although the task depended on an external API, guessing the date instead of calling datetime, rewriting a whole file instead of a targeted replace_in_file, editing before calling update_todos, using the wrong build, test, or run command for this user's setup, running an interactive program headless, funneling a normal task through an MCP server, ignoring a convention this user has already stated. Misses that FAIL the test, where you must NOT propose anything: a plain bug, wrong logic, a misread file, an invented symbol, a bad design call, anything whose only lesson is \"write better code\", \"be more careful\", \"read it properly\", or \"do not do that again\". Those are not rules, they are noise that makes every future chat worse. Skip the offer as well when the fact is specific to this one task, when the REMEMBERED CONTEXT or list_memories already covers it, or when you already proposed it in this chat. If the rule only holds for the project that is currently open, AGENTS.md is where it belongs, not memory. At most one such proposal per response, and keep the sentence dry: no apology, no self-criticism, no ceremony.");
   }
   if (payload.planMode) {
     lines.push("PLAN MODE IS ON. You may ONLY read and inspect the project (read_file, list_files, grep_files, get_file_outline). Do NOT write files or run commands. Once you understand the task, you MUST present your plan by calling the present_plan tool, do NOT write the plan as a normal text message. The present_plan tool call is the ONLY way the user can review and approve your plan. Do not write any code yet.");
@@ -3426,7 +3476,8 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
       call.id = `call_${toolCallSeq++}`;
     }
   }
-  if (!content && !calls.length && reasoning.trim()) {
+  // never on "length": a round that burned its whole output budget on reasoning would otherwise dump the entire raw chain into the chat as the answer
+  if (!content && !calls.length && reasoning.trim() && finishReason !== "length") {
     content = reasoning.trim();
     onEvent({ type: "delta", delta: content });
     onDraft?.({ role: "assistant", content });
@@ -3434,6 +3485,10 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
   const message = { role: "assistant", content, finishReason };
   if (calls.length) {
     message.tool_calls = calls;
+  }
+  // out-of-band for the max-output dump, the caller strips it before this message goes back on the wire
+  if (finishReason === "length" && reasoning.trim()) {
+    message.reasoningText = reasoning;
   }
   return message;
 };
@@ -3816,6 +3871,8 @@ const runDelegatedAgentTask = async ({
           agentSessionManager.appendText(session.id, run.id, textEntryId, event.delta);
         }
       }, controller.signal, target, () => {});
+      // agents have no max-output dump, and saveContext would persist the whole chain to disk
+      delete message.reasoningText;
       messages.push(message);
       if (controller.signal.aborted) {
         status = runtimeExpired ? "interrupted" : "canceled";
@@ -3956,6 +4013,7 @@ const runDelegatedAgentTask = async ({
         }
       }, controller.signal, target);
       terminalText = String(finalMessage.content || "").trim();
+      delete finalMessage.reasoningText;
       messages.push(finalMessage);
     }
   } catch (error) {
@@ -4094,6 +4152,41 @@ const verifyGoal = async (settings, goal, submitted, index, projectPath, convers
   }
 };
 
+// one file per turn, overwritten on each overflow, so a long turn cannot litter the project root
+const reasoningDumpName = (turnId) => {
+  const clean = String(turnId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(-12);
+  return `vantheax-reasoning-${clean || "turn"}.json`;
+};
+
+// reasoning is stored line-by-line because a single huge JSON string is one un-windowable line to read_file
+const writeReasoningDump = async (root, turnId, round, model, reasoning) => {
+  const name = reasoningDumpName(turnId);
+  const target = path.join(root, name);
+  const lines = reasoning.split("\n");
+  // bounded by CHARS, not lines: 60 paragraph-length lines can blow past read_file's token cap and make the instructed header read fail outright
+  const tail = reasoning.slice(-8000).split("\n").slice(-60);
+  const body = {
+    reason: "max_output_reached",
+    round,
+    model: model || "",
+    totalChars: reasoning.length,
+    totalLines: lines.length,
+    note: "Your own reasoning from the round that ran out of output budget. 'tail' is exactly where you were cut off, read that first.",
+    tail,
+    reasoning: lines,
+  };
+  const tmp = `${target}.${Date.now().toString(36)}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(body, null, 2), "utf8");
+    await fs.rename(tmp, target);
+  } catch (error) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
+  // 1 brace + 6 scalar keys + the "tail": [ line + N entries + the closing ], so the suggested read stops exactly before the unbounded reasoning array
+  return { name, headLimit: tail.length + 9 };
+};
+
 const runAgentStream = async (payload, sender) => {
   const emitBase = (event) => sender.send("agent:event", { requestId: payload.requestId, ...event });
   const settings = await readSettings();
@@ -4139,6 +4232,7 @@ const runAgentStream = async (payload, sender) => {
     const runtime = { depth: 0, payload, deployments: { count: 0 }, commandBudget: { count: 0 } };
     let finalText = "";
     let lastFinish = "";
+    let overflowCount = 0;
     const goalActive = Boolean(payload.goalMode && payload.goal && !payload.planMode);
     let goalRound = 0;
     while (true) {
@@ -4182,6 +4276,8 @@ const runAgentStream = async (payload, sender) => {
           finalText += message.content;
         }
         lastFinish = message.finishReason || lastFinish;
+        const overflowReasoning = message.reasoningText || "";
+        delete message.reasoningText;
         messages.push(message);
         contextTracker.commit();
         if (controller.signal.aborted) {
@@ -4190,7 +4286,36 @@ const runAgentStream = async (payload, sender) => {
         const toolCalls = message.tool_calls || [];
         if (!toolCalls.length) {
           if (message.finishReason === "length" && round < maxToolRounds - 1) {
-            messages.push({ role: "user", content: "Your last message hit the token limit and was cut off mid-task. Continue exactly where you left off and keep calling tools (write_file/replace_in_file) until the whole task is actually finished." });
+            overflowCount += 1;
+            const hadContent = Boolean((message.content || "").trim());
+            let dumpPath = "";
+            let headLimit = 0;
+            if (overflowReasoning.trim()) {
+              try {
+                const dump = await writeReasoningDump(projectPath, payload.turnId, round + 1, payload.model, overflowReasoning);
+                dumpPath = dump.name;
+                headLimit = dump.headLimit;
+              } catch {}
+            }
+            const readHint = `Read it with read_file using start_line 1 and limit ${headLimit}: that window is the "tail" field, the exact point where you were cut off. Do NOT read the whole file, the full chain is under "reasoning" below that and is too large to read at once.`;
+            const urgent = overflowCount >= 3
+              ? " You have now run out of output budget three times in this turn. Stop planning entirely: produce real output or make a tool call in this round."
+              : "";
+            const note = !dumpPath
+              ? "Your last message hit the model's maximum output length and was cut off mid-task. Continue exactly where you left off and keep calling tools (write_file/replace_in_file) until the whole task is actually finished."
+              : (hadContent
+                  ? `You hit the model's maximum output length and your message was cut off mid-sentence. Your reasoning from that round was saved to "${dumpPath}" in the project root. ${readHint} Then continue your answer from exactly where it broke off: do not start over, do not repeat what you already wrote, and do not apologize.${urgent}`
+                  : `You hit the model's maximum output length while you were still thinking, so nothing reached the user. Your full reasoning chain was saved to "${dumpPath}" in the project root. ${readHint} Then continue from the point where you stopped instead of planning it all again.${urgent}`);
+            const toolEvent = {
+              // overflowCount, not round: round restarts at 0 on every goal-mode pass and the renderer replaces steps by id
+              id: `maxout-${overflowCount}`,
+              name: "max_output_error",
+              args: {},
+              result: { maxOutputError: true, dumpPath, round: round + 1, chars: overflowReasoning.length, message: note },
+            };
+            tools.push(toolEvent);
+            emit({ type: "tool", tool: toolEvent });
+            messages.push({ role: "user", content: note });
             contextTracker.commit();
             continue;
           }
@@ -4316,10 +4441,14 @@ const runAgentStream = async (payload, sender) => {
             planPresented = true;
           }
           const toolEvent = { id: call.id, name: call.function.name, args: callArgs, result };
-          tools.push(toolEvent);
+          // continue_thinking renders no step, it only flips the live label; it still goes through emit as a tool so the narrator's tick advances in lockstep with the renderer
+          const hidden = call.function.name === "continue_thinking";
+          if (!hidden) {
+            tools.push(toolEvent);
+          }
           messages.push({ role: "tool", tool_call_id: call.id, content: capToolContent(result) });
           contextTracker.commit();
-          emit({ type: "tool", tool: toolEvent });
+          emit({ type: "tool", tool: toolEvent, hidden });
         }
         if (submitted || planPresented) {
           break;
