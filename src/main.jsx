@@ -119,6 +119,20 @@ const STRINGS = {
     "cluster.commands": "Ran {n} commands",
     "cluster.reads": "Read {n} files",
     "cluster.mcp": "Ran {n} MCP commands",
+    "cluster.searches": "Searched {n} strings",
+    "combine.searches.one": "searched {n} string",
+    "combine.searches.other": "searched {n} strings",
+    "combine.reads.one": "read {n} file",
+    "combine.reads.other": "read {n} files",
+    "combine.commands.one": "ran {n} command",
+    "combine.commands.other": "ran {n} commands",
+    "combine.mcp.one": "{n} MCP call",
+    "combine.mcp.other": "{n} MCP calls",
+    "combine.edits.one": "edited {n} file",
+    "combine.edits.other": "edited {n} files",
+    "row.read": "Read {x}",
+    "row.edited": "Edited {x}",
+    "row.searched": "Searched {x}",
     "todo.tasks": "Tasks",
     "todo.none": "No tasks yet",
     "todo.goal": "Goal",
@@ -142,6 +156,7 @@ const STRINGS = {
     "toollabel.grepping": "Searching {x}",
     "grep.matches": "{n} matches",
     "grep.noMatches": "No matches",
+    "preview.more": "… +{n} more lines",
     "toollabel.writing": "Writing {x}",
     "toollabel.editing": "Editing {x}",
     "toollabel.reading": "Reading {x}",
@@ -232,6 +247,7 @@ const STRINGS = {
     "toollabel.webSearch": "Searching the web",
     "toollabel.analyzeImage": "Analyzing image",
     "toollabel.datetime": "Checking the date and time",
+    "toollabel.agentStatus": "Agent status · {x}",
     "toollabel.remember": "Saving a memory",
     "toollabel.forget": "Forgetting a memory",
     "toollabel.listMemories": "Reading memories",
@@ -360,6 +376,8 @@ const STRINGS = {
     "status.saved": "Settings saved",
     "status.noVision": "Selected model does not support image parsing",
     "status.selectImage": "Select an image file",
+    "status.maxImages": "You can attach up to {n} images",
+    "composer.removeImage": "Remove image",
     "status.analyzingImage": "Analyzing image...",
     "status.stopped": "Stopped",
     "vision.warning": "Current model does not support image parsing.",
@@ -479,6 +497,20 @@ const STRINGS = {
     "cluster.commands": "{n} Befehle ausgeführt",
     "cluster.reads": "{n} Dateien gelesen",
     "cluster.mcp": "{n} MCP-Befehle ausgeführt",
+    "cluster.searches": "{n} Strings durchsucht",
+    "combine.searches.one": "{n} String durchsucht",
+    "combine.searches.other": "{n} Strings durchsucht",
+    "combine.reads.one": "{n} Datei gelesen",
+    "combine.reads.other": "{n} Dateien gelesen",
+    "combine.commands.one": "{n} Befehl ausgeführt",
+    "combine.commands.other": "{n} Befehle ausgeführt",
+    "combine.mcp.one": "{n} MCP-Aufruf",
+    "combine.mcp.other": "{n} MCP-Aufrufe",
+    "combine.edits.one": "{n} Datei bearbeitet",
+    "combine.edits.other": "{n} Dateien bearbeitet",
+    "row.read": "{x} gelesen",
+    "row.edited": "{x} bearbeitet",
+    "row.searched": "{x} durchsucht",
     "todo.tasks": "Aufgaben",
     "todo.none": "Noch keine Aufgaben",
     "todo.goal": "Ziel",
@@ -502,6 +534,7 @@ const STRINGS = {
     "toollabel.grepping": "Sucht {x}",
     "grep.matches": "{n} Treffer",
     "grep.noMatches": "Keine Treffer",
+    "preview.more": "… +{n} weitere Zeilen",
     "toollabel.writing": "Schreibt {x}",
     "toollabel.editing": "Bearbeitet {x}",
     "toollabel.reading": "Liest {x}",
@@ -592,6 +625,7 @@ const STRINGS = {
     "toollabel.webSearch": "Durchsucht das Web",
     "toollabel.analyzeImage": "Bild wird analysiert",
     "toollabel.datetime": "Prüft Datum und Uhrzeit",
+    "toollabel.agentStatus": "Agent-Status · {x}",
     "toollabel.remember": "Speichert eine Erinnerung",
     "toollabel.forget": "Vergisst eine Erinnerung",
     "toollabel.listMemories": "Liest Erinnerungen",
@@ -720,6 +754,8 @@ const STRINGS = {
     "status.saved": "Einstellungen gespeichert",
     "status.noVision": "Gewähltes Modell unterstützt keine Bilder",
     "status.selectImage": "Bilddatei auswählen",
+    "status.maxImages": "Du kannst höchstens {n} Bilder anhängen",
+    "composer.removeImage": "Bild entfernen",
     "status.analyzingImage": "Bild wird analysiert...",
     "status.stopped": "Gestoppt",
     "vision.warning": "Aktuelles Modell unterstützt keine Bilder.",
@@ -854,7 +890,49 @@ const makeChat = (projectPath = "") => ({
   summaryCount: 0,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
+  messagesLoaded: true,
 });
+
+const clearStoredRunningTool = (entry) => (entry?.result?.running
+  ? { ...entry, result: { ...entry.result, running: false, error: entry.result.error || "(command interrupted, the app was closed before it finished)" } }
+  : entry);
+
+const restoreStoredChat = (chat) => {
+  if (!chat?.messagesLoaded) {
+    return chat;
+  }
+  return {
+    ...chat,
+    messages: (chat.messages || []).map((message) => {
+      let next = (message.role === "assistant" && message.done === false) ? { ...message, done: true, cancelled: true } : message;
+      if (next.role === "assistant") {
+        if (Array.isArray(next.segments)) {
+          next = { ...next, segments: next.segments.map((segment) => segment.type === "tool" ? { ...segment, tool: clearStoredRunningTool(segment.tool) } : segment) };
+        }
+        if (Array.isArray(next.tools)) {
+          next = { ...next, tools: next.tools.map(clearStoredRunningTool) };
+        }
+      }
+      return next;
+    }),
+  };
+};
+
+const unloadStoredChat = (chat) => {
+  const searchText = [
+    chat?.title,
+    chat?.projectPath,
+    ...(chat?.messages || []).map((message) => message?.content || ""),
+  ].filter(Boolean).join(" ").slice(0, 120000);
+  return {
+    ...chat,
+    messages: [],
+    summary: "",
+    searchText,
+    messageCount: Array.isArray(chat?.messages) ? chat.messages.length : Number(chat?.messageCount) || 0,
+    messagesLoaded: false,
+  };
+};
 
 const forkChatAtMessage = (chat, messageId, id = crypto.randomUUID(), timestamp = new Date().toISOString()) => {
   const index = (chat?.messages || []).findIndex((message) => message.id === messageId);
@@ -877,9 +955,12 @@ const forkChatAtMessage = (chat, messageId, id = crypto.randomUUID(), timestamp 
   };
 };
 
+const MAX_ATTACHMENTS = 10;
+const messageAttachments = (message) => (Array.isArray(message?.attachments) ? message.attachments : (message?.attachment ? [message.attachment] : []));
+
 const deletableAttachmentNames = (chats, chatId) => {
   const target = chats.find((chat) => chat.id === chatId);
-  const targetNames = new Set((target?.messages || []).map((message) => message?.attachment?.name).filter(Boolean));
+  const targetNames = new Set((target?.messages || []).flatMap((message) => messageAttachments(message).map((att) => att.name)).filter(Boolean));
   if (!targetNames.size) {
     return [];
   }
@@ -888,7 +969,9 @@ const deletableAttachmentNames = (chats, chatId) => {
       continue;
     }
     for (const message of chat.messages || []) {
-      targetNames.delete(message?.attachment?.name);
+      for (const att of messageAttachments(message)) {
+        targetNames.delete(att.name);
+      }
     }
   }
   return [...targetNames];
@@ -908,8 +991,13 @@ const visualNoteFor = (attachment) => (attachment && attachment.analysis) ? `\n\
 const collectImageAnalyses = (messages) => {
   const out = [];
   for (const message of messages || []) {
-    if (message.role === "user" && message.attachment && message.attachment.analysis) {
-      out.push(`image "${message.attachment.name}": ${message.attachment.analysis}`);
+    if (message.role !== "user") {
+      continue;
+    }
+    for (const att of messageAttachments(message)) {
+      if (att.analysis) {
+        out.push(`image "${att.name}": ${att.analysis}`);
+      }
     }
   }
   return out;
@@ -917,7 +1005,7 @@ const collectImageAnalyses = (messages) => {
 
 const cleanHistory = (messages) => messages
   .filter((message) => message.role === "user" || message.role === "assistant")
-  .map((message) => ({ role: message.role, content: (message.content || "") + (message.cancelled ? "\n\n[The user stopped this response before it finished.]" : "") + (message.reverted ? "\n\n[The user reverted the file changes from this turn. Those edits were undone and the files restored to their previous state, so they are no longer applied. Do not assume they still exist; re-read the files if you need their current contents.]" : "") + visualNoteFor(message.attachment) }))
+  .map((message) => ({ role: message.role, content: (message.content || "") + (message.cancelled ? "\n\n[The user stopped this response before it finished.]" : "") + (message.reverted ? "\n\n[The user reverted the file changes from this turn. Those edits were undone and the files restored to their previous state, so they are no longer applied. Do not assume they still exist; re-read the files if you need their current contents.]" : "") + messageAttachments(message).map((att) => visualNoteFor(att)).join("") }))
   .filter((message) => message.content.trim());
 
 const collectReadPaths = (messages) => {
@@ -1119,7 +1207,7 @@ const NARRATE_QUEUE_MAX = 5;
 // a trailing ellipsis means the model is still doing the thing, so the line waits it out
 const narrateHoldFor = (text) => (text.endsWith("...") ? NARRATE_ACTION_HOLD_MS : NARRATE_MIN_HOLD_MS);
 
-const narrationStore = (() => {
+const createNarrationStore = () => {
   const subs = new Set();
   const s = {
     owner: null,
@@ -1293,6 +1381,22 @@ const narrationStore = (() => {
       }
       kick();
     },
+    // agent transcripts are not paced, so lines are always eligible; adopt the run as owner on first line
+    enqueueLive(requestId, lines, pauseAfter) {
+      if (s.owner !== requestId) {
+        clearAll();
+        s.owner = requestId;
+        s.turnStartedAt = Date.now();
+      }
+      const clean = (lines || []).map((text) => String(text || "").trim()).filter(Boolean);
+      clean.forEach((text, i) => {
+        s.queue.push({ text, tick: s.appliedTick, pauseAfter: Boolean(pauseAfter) && i === clean.length - 1 });
+      });
+      while (s.queue.length > NARRATE_QUEUE_MAX) {
+        s.queue.shift();
+      }
+      kick();
+    },
     applyTool(requestId, id) {
       if (s.owner !== requestId) {
         return;
@@ -1374,10 +1478,25 @@ const narrationStore = (() => {
       return line;
     },
   };
-})();
+};
 
-const useNarrationLine = () => useSyncExternalStore(narrationStore.subscribe, narrationStore.getLine);
-const useLiveLabel = () => useNarrationLine() || t("work.thinking");
+const narrationStore = createNarrationStore();
+const agentNarrationStores = new Map();
+const getAgentNarrationStore = (agentId) => {
+  const key = String(agentId || "");
+  if (!key) {
+    return narrationStore;
+  }
+  let store = agentNarrationStores.get(key);
+  if (!store) {
+    store = createNarrationStore();
+    agentNarrationStores.set(key, store);
+  }
+  return store;
+};
+
+const useNarrationLine = (store = narrationStore) => useSyncExternalStore(store.subscribe, store.getLine);
+const useLiveLabel = (store = narrationStore) => useNarrationLine(store) || t("work.thinking");
 
 const contextUsageStore = (() => {
   const subscribers = new Set();
@@ -1818,14 +1937,14 @@ const UI_FONTS = [
 ];
 
 const MONO_FONTS = [
-  { id: "JetBrains Mono", stack: '"JetBrains Mono", ui-monospace, monospace' },
-  { id: "Fira Code", stack: '"Fira Code", ui-monospace, monospace' },
-  { id: "Source Code Pro", stack: '"Source Code Pro", ui-monospace, monospace' },
-  { id: "IBM Plex Mono", stack: '"IBM Plex Mono", ui-monospace, monospace' },
-  { id: "Roboto Mono", stack: '"Roboto Mono", ui-monospace, monospace' },
-  { id: "Space Mono", stack: '"Space Mono", ui-monospace, monospace' },
-  { id: "Cascadia Code", stack: '"Cascadia Code", "Cascadia Mono", ui-monospace, monospace' },
-  { id: "Consolas", stack: 'Consolas, ui-monospace, monospace' },
+  { id: "JetBrains Mono", stack: '"JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "Fira Code", stack: '"Fira Code", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "Source Code Pro", stack: '"Source Code Pro", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "IBM Plex Mono", stack: '"IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "Roboto Mono", stack: '"Roboto Mono", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "Space Mono", stack: '"Space Mono", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "Cascadia Code", stack: '"Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace' },
+  { id: "Consolas", stack: 'Consolas, "Cascadia Mono", ui-monospace, monospace' },
   { id: "Courier New", stack: '"Courier New", monospace' },
 ];
 
@@ -1929,7 +2048,8 @@ const App = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [windowMaximized, setWindowMaximized] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [imageAttachment, setImageAttachment] = useState(null);
+  const [imageAttachments, setImageAttachments] = useState([]);
+  const [lightbox, setLightbox] = useState(null);
   const [planMode, setPlanMode] = useState(false);
   const [goalMode, setGoalMode] = useState(false);
   const [goalText, setGoalText] = useState("");
@@ -2048,32 +2168,15 @@ const App = () => {
   useEffect(() => {
     const init = async () => {
       const [loadedSettings, loadedModels] = await Promise.all([api.getSettings(), api.getModels()]);
-      let storedChats = await api.loadChats();
+      const storedActive = localStorage.getItem(activeChatKey) || "";
+      let storedChats = await api.loadChats(storedActive);
       const legacyChats = loadLocalChats();
       if (!storedChats.length && legacyChats.length) {
-        storedChats = legacyChats;
-        await api.saveChats(storedChats);
+        await api.importChats(legacyChats);
+        storedChats = await api.loadChats(storedActive);
         localStorage.removeItem(chatsKey);
       }
-      const clearRunningTool = (entry) => (entry?.result?.running
-        ? { ...entry, result: { ...entry.result, running: false, error: entry.result.error || "(command interrupted, the app was closed before it finished)" } }
-        : entry);
-      storedChats = storedChats.map((chat) => ({
-        ...chat,
-        messages: (chat.messages || []).map((message) => {
-          let next = (message.role === "assistant" && message.done === false) ? { ...message, done: true, cancelled: true } : message;
-          if (next.role === "assistant") {
-            if (Array.isArray(next.segments)) {
-              next = { ...next, segments: next.segments.map((seg) => seg.type === "tool" ? { ...seg, tool: clearRunningTool(seg.tool) } : seg) };
-            }
-            if (Array.isArray(next.tools)) {
-              next = { ...next, tools: next.tools.map(clearRunningTool) };
-            }
-          }
-          return next;
-        }),
-      }));
-      const storedActive = localStorage.getItem(activeChatKey) || "";
+      storedChats = storedChats.map(restoreStoredChat);
       setSettings(loadedSettings);
       setModels(loadedModels);
       setChats(storedChats);
@@ -2150,12 +2253,12 @@ const App = () => {
   }, [plusMenuOpen, brandMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, rightPanel, titleMenuOpen]);
 
   useEffect(() => {
-    if (!chatsLoadedRef.current) {
+    if (!chatsLoadedRef.current || !activeChat || activeChat.messagesLoaded === false) {
       return;
     }
-    const timer = setTimeout(() => { api.saveChats(chats); }, 400);
+    const timer = setTimeout(() => { api.saveChat(activeChat).catch(() => {}); }, 400);
     return () => clearTimeout(timer);
-  }, [chats]);
+  }, [activeChat]);
 
   useEffect(() => {
     if (activeChatId) {
@@ -2215,7 +2318,7 @@ const App = () => {
       return pool.slice(0, 40);
     }
     return pool.filter((chat) => {
-      const haystack = `${chat.title} ${chat.projectPath} ${(chat.messages || []).map((message) => message.content).join(" ")}`.toLowerCase();
+      const haystack = `${chat.title} ${chat.projectPath} ${chat.searchText || ""} ${(chat.messages || []).map((message) => message.content).join(" ")}`.toLowerCase();
       return haystack.includes(text);
     }).slice(0, 40);
   }, [chats, chatQuery]);
@@ -2278,6 +2381,7 @@ const App = () => {
       api.deleteImages(names).catch(() => {});
     }
     api.deleteBackgroundTasks(chatId).catch(() => {});
+    api.deleteChat(chatId).catch(() => {});
     backgroundTaskStore.removeChat(chatId);
     updateChats((current) => current.filter((chat) => chat.id !== chatId));
     if (activeChatId === chatId) {
@@ -2335,6 +2439,9 @@ const App = () => {
     await refreshProject(pathValue);
     const saved = await api.getSettings();
     setSettings(saved);
+    if (activeChat?.messagesLoaded !== false) {
+      await api.saveChat(activeChat).catch(() => {});
+    }
     setActiveChatId("");
   };
 
@@ -2350,6 +2457,9 @@ const App = () => {
     await refreshProject(pathValue);
     const saved = await api.getSettings();
     setSettings(saved);
+    if (activeChat?.messagesLoaded !== false) {
+      await api.saveChat(activeChat).catch(() => {});
+    }
     setActiveChatId("");
   };
 
@@ -2358,6 +2468,15 @@ const App = () => {
     setProjectPath(pathValue);
     setSelectedFile(null);
     setSelectedContent("");
+    await refreshProject(pathValue);
+  };
+
+  const openProjectRoot = async (pathValue) => {
+    if (activeChat?.messagesLoaded !== false) {
+      await api.saveChat(activeChat).catch(() => {});
+    }
+    setActiveChatId("");
+    setProjectPath(pathValue);
     await refreshProject(pathValue);
   };
 
@@ -2443,13 +2562,16 @@ const App = () => {
     }
   }, [resendText, busy]);
 
-  const newChat = () => {
+  const newChat = async () => {
     cancelActiveStream();
+    if (activeChat?.messagesLoaded !== false) {
+      await api.saveChat(activeChat).catch(() => {});
+    }
     followBottom = true;
     setActiveChatId("");
     setTitleAnim(null);
     setInput("");
-    setImageAttachment(null);
+    setImageAttachments([]);
     setGoalText("");
     setTodos([]);
     setGoalDone(false);
@@ -2522,15 +2644,31 @@ const App = () => {
 
   const openChat = async (chat) => {
     cancelActiveStream();
+    if (activeChat?.id !== chat.id && activeChat?.messagesLoaded !== false) {
+      await api.saveChat(activeChat).catch(() => {});
+    }
+    const loaded = chat.messagesLoaded === false ? restoreStoredChat(await api.loadChat(chat.id)) : chat;
+    if (!loaded) {
+      return;
+    }
     followBottom = true;
-    setActiveChatId(chat.id);
+    setChats((current) => current.map((item) => {
+      if (item.id === loaded.id) {
+        return loaded;
+      }
+      if (item.id === activeChat?.id && item.messagesLoaded !== false) {
+        return unloadStoredChat(item);
+      }
+      return item;
+    }));
+    setActiveChatId(loaded.id);
     setSearchOpen(false);
     setTodos([]);
     setGoalDone(false);
-    if (normPath(chat.projectPath) !== normPath(projectPath)) {
-      if (chat.projectPath) {
-        setProjectPath(chat.projectPath);
-        await refreshProject(chat.projectPath);
+    if (normPath(loaded.projectPath) !== normPath(projectPath)) {
+      if (loaded.projectPath) {
+        setProjectPath(loaded.projectPath);
+        await refreshProject(loaded.projectPath);
       } else {
         setProjectPath("");
         setProjectIndex(emptyIndex);
@@ -2548,12 +2686,13 @@ const App = () => {
       return;
     }
     followBottom = true;
-    setChats((current) => [fork, ...current]);
+    api.saveChat(activeChat).catch(() => {});
+    setChats((current) => [fork, ...current.map((item) => item.id === activeChat.id ? unloadStoredChat(item) : item)]);
     setActiveChatId(fork.id);
     setSearchOpen(false);
     setTitleAnim(null);
     setInput("");
-    setImageAttachment(null);
+    setImageAttachments([]);
     setEditingMessageId("");
     setTodos([]);
     setGoalDone(false);
@@ -2857,33 +2996,50 @@ const App = () => {
     fileInputRef.current?.click();
   };
 
+  const addImageFiles = async (files) => {
+    const images = files.filter((file) => file && file.type && file.type.startsWith("image/"));
+    if (!images.length) {
+      if (files.length) {
+        setStatus(t("status.selectImage"));
+      }
+      return;
+    }
+    const slots = MAX_ATTACHMENTS - imageAttachments.length;
+    if (slots <= 0) {
+      setStatus(t("status.maxImages", { n: MAX_ATTACHMENTS }));
+      return;
+    }
+    const loaded = [];
+    for (const file of images.slice(0, slots)) {
+      try {
+        loaded.push({
+          id: crypto.randomUUID(),
+          name: file.name || `pasted_${Date.now()}_${loaded.length}.png`,
+          type: file.type || "image/png",
+          size: file.size,
+          dataUrl: await fileToDataUrl(file),
+        });
+      } catch {}
+    }
+    if (loaded.length) {
+      setImageAttachments((current) => [...current, ...loaded].slice(0, MAX_ATTACHMENTS));
+    }
+  };
+
   const onImageSelected = async (event) => {
-    const file = event.target.files?.[0];
+    const files = [...(event.target.files || [])];
     event.target.value = "";
-    if (!file) {
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      setStatus(t("status.selectImage"));
-      return;
-    }
-    const dataUrl = await fileToDataUrl(file);
-    setImageAttachment({ name: file.name, type: file.type, size: file.size, dataUrl });
+    await addImageFiles(files);
   };
 
   const onComposerPaste = async (event) => {
-    for (const item of event.clipboardData?.items || []) {
-      if (item.type && item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        if (file) {
-          event.preventDefault();
-          try {
-            const dataUrl = await fileToDataUrl(file);
-            setImageAttachment({ name: file.name || `pasted_${Date.now()}.png`, type: file.type || "image/png", size: file.size, dataUrl });
-          } catch {}
-          return;
-        }
-      }
+    const files = [...(event.clipboardData?.items || [])]
+      .filter((item) => item.type && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (files.length) {
+      event.preventDefault();
+      await addImageFiles(files);
     }
   };
 
@@ -2896,23 +3052,26 @@ const App = () => {
     if (!isBackgroundContinuation && goalMode && !goalText.trim() && text) {
       setGoalText(text);
     }
-    if ((!text && !imageAttachment) || busy || naming || compactingRef.current || (isBackgroundContinuation && backgroundTask.chatId !== activeChatIdRef.current)) {
+    if ((!text && !imageAttachments.length) || busy || naming || compactingRef.current || (isBackgroundContinuation && backgroundTask.chatId !== activeChatIdRef.current)) {
       return false;
     }
-    const attachment = isBackgroundContinuation ? null : imageAttachment;
+    const attachments = isBackgroundContinuation ? [] : imageAttachments;
     if (!isBackgroundContinuation) {
-      setImageAttachment(null);
+      setImageAttachments([]);
     }
-    let savedImage = null;
-    if (attachment) {
+    let savedImages = [];
+    if (attachments.length) {
       setBusy(true);
-      try {
-        const saved = await api.saveImage({ dataUrl: attachment.dataUrl, type: attachment.type });
-        if (saved && !saved.error) {
-          savedImage = saved;
-          imageDataUrlCache.set(saved.name, attachment.dataUrl);
-        }
-      } catch {}
+      savedImages = (await Promise.all(attachments.map(async (att) => {
+        try {
+          const saved = await api.saveImage({ dataUrl: att.dataUrl, type: att.type });
+          if (saved && !saved.error) {
+            imageDataUrlCache.set(saved.name, att.dataUrl);
+            return { name: saved.name, path: saved.path, type: att.type, size: att.size, analysis: "" };
+          }
+        } catch {}
+        return null;
+      }))).filter(Boolean);
     }
     if (!isBackgroundContinuation) {
       setTodos([]);
@@ -2924,8 +3083,8 @@ const App = () => {
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      content: text || "Analyze this image.",
-      attachment: savedImage ? { name: savedImage.name, path: savedImage.path, type: attachment.type, size: attachment.size, analysis: "" } : null,
+      content: text || (savedImages.length > 1 ? "Analyze these images." : "Analyze this image."),
+      attachments: savedImages,
       createdAt: new Date().toISOString(),
       hidden: isBackgroundContinuation,
     };
@@ -2960,20 +3119,22 @@ const App = () => {
     if (needsTitle) {
       await typeChatTitle(chat.id, nextTitle);
     }
-    let imageAnalysis = "";
-    if (savedImage) {
+    let imageAnalyses = [];
+    if (savedImages.length) {
       setStatus(t("status.analyzingImage"));
-      try {
-        const res = await api.analyzeImage({ path: savedImage.name, question: text || "" });
-        imageAnalysis = (res && res.analysis) ? res.analysis : "";
-      } catch {}
+      imageAnalyses = await Promise.all(savedImages.map(async (img) => {
+        try {
+          const res = await api.analyzeImage({ path: img.name, question: text || "" });
+          if (res && res.analysis) {
+            return res.analysis;
+          }
+        } catch {}
+        return "(Image analysis was unavailable; the attached image could not be analyzed this time.)";
+      }));
       setStatus("");
-      if (!imageAnalysis) {
-        imageAnalysis = "(Image analysis was unavailable; the attached image could not be analyzed this time.)";
-      }
-      updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((m) => (m.id === userMessage.id && m.attachment) ? { ...m, attachment: { ...m.attachment, analysis: imageAnalysis } } : m) } : item));
+      updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((m) => (m.id === userMessage.id && Array.isArray(m.attachments)) ? { ...m, attachments: m.attachments.map((att, i) => ({ ...att, analysis: imageAnalyses[i] || att.analysis })) } : m) } : item));
     }
-    const outgoing = userMessage.content + (savedImage ? visualNoteFor({ name: savedImage.name, analysis: imageAnalysis }) : "");
+    const outgoing = userMessage.content + savedImages.map((img, i) => visualNoteFor({ name: img.name, analysis: imageAnalyses[i] })).join("");
     let effSummary = chat.summary || "";
     let effStart = chat.summaryCount || 0;
     const currentUsage = contextUsageStore.getUsage();
@@ -3088,7 +3249,7 @@ const App = () => {
         goalMode,
         goal: effectiveGoal,
         message: outgoing,
-        visualContext: [...collectImageAnalyses(previousMessages.slice(effStart)), ...(userMessage.attachment && imageAnalysis ? [`image "${userMessage.attachment.name}": ${imageAnalysis}`] : [])],
+        visualContext: [...collectImageAnalyses(previousMessages.slice(effStart)), ...savedImages.map((img, i) => imageAnalyses[i] ? `image "${img.name}": ${imageAnalyses[i]}` : "").filter(Boolean)],
         summary: effSummary,
         history: cleanHistory(previousMessages.slice(effStart)),
         readPaths: collectReadPaths(previousMessages.slice(effStart)),
@@ -3352,7 +3513,7 @@ const App = () => {
                   return (
                     <div key={item} className="project-group">
                       <div className={item === projectPath && !activeChatId ? "project-head active" : "project-head"}>
-                        <button className="project-head-main" title={item} onClick={async () => { setActiveChatId(""); setProjectPath(item); await refreshProject(item); }}>
+                        <button className="project-head-main" title={item} onClick={() => openProjectRoot(item)}>
                           <FolderClosed size={15} />
                           <span className="project-head-name">{folderName(item)}</span>
                         </button>
@@ -3458,7 +3619,8 @@ const App = () => {
                     projectPath={projectPath}
                     onUndoTurn={undoTurn}
                     onReveal={revealPath}
-                    onFork={forkChat} />
+                    onFork={forkChat}
+                    onImageClick={setLightbox} />
                 </React.Fragment>
               ))}
             </div>
@@ -3469,26 +3631,25 @@ const App = () => {
               <h1 className="hero-title">{projectPath ? t("hero.project", { name: folderName(projectPath) }) : t("hero.generic")}</h1>
             )}
             {compressing && <CompressingOverlay />}
+            {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
             <div className="composer-stack">
               {pendingPermission ? (
                 <ApprovalForm tool={pendingPermission.tool} onResolve={(decision) => resolvePermission(pendingPermission.callId, decision)} />
               ) : (
               <div className="composer">
-                {imageAttachment && (
-                  <div className="composer-attachment">
-                    <div className="image-chip">
-                      <img src={imageAttachment.dataUrl} alt="" />
-                      <div>
-                        <span>{imageAttachment.name}</span>
-                        <small>{formatSize(imageAttachment.size)}</small>
+                {imageAttachments.length > 0 && (
+                  <div className="composer-thumbs">
+                    {imageAttachments.map((att) => (
+                      <div className="composer-thumb" key={att.id}>
+                        <img src={att.dataUrl} alt="" onClick={() => setLightbox({ dataUrl: att.dataUrl })} />
+                        <button type="button" className="thumb-remove" title={t("composer.removeImage")} onClick={() => setImageAttachments((current) => current.filter((item) => item.id !== att.id))}><X size={12} /></button>
                       </div>
-                      <button onClick={() => setImageAttachment(null)}><X size={14} /></button>
-                    </div>
+                    ))}
                   </div>
                 )}
                 <textarea value={input} onChange={(event) => setInput(event.target.value)} onPaste={onComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={goalMode && !goalText ? t("composer.goalPlaceholder") : t("composer.placeholder")} />
                 <div className="composer-controls">
-                  <input ref={fileInputRef} className="hidden-input" type="file" accept="image/*" onChange={onImageSelected} />
+                  <input ref={fileInputRef} className="hidden-input" type="file" accept="image/*" multiple onChange={onImageSelected} />
                   <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
                   <PermissionPicker value={settings.mode} open={permissionOpen} onToggle={() => setPermissionOpen(!permissionOpen)} onChange={(mode) => { persistSettings({ mode }); setPermissionOpen(false); }} />
                   <div className="composer-spacer" />
@@ -3502,7 +3663,7 @@ const App = () => {
                       <Square size={15} />
                     </button>
                   ) : (
-                    <button className="send-button" onClick={sendMessage} disabled={compressing || (!input.trim() && !imageAttachment)}>
+                    <button className="send-button" onClick={sendMessage} disabled={compressing || (!input.trim() && !imageAttachments.length)}>
                       <ArrowUp size={18} />
                     </button>
                   )}
@@ -3629,36 +3790,42 @@ const TurnNavigator = ({ turns, scrollerRef }) => {
   const scrollRafRef = useRef(0);
   const updateRafRef = useRef(0);
 
+  const update = useCallback(() => {
+    updateRafRef.current = 0;
+    const scroller = scrollerRef.current;
+    if (!scroller) {
+      return;
+    }
+    const nodes = [...scroller.querySelectorAll(".message[data-turn-id]")];
+    if (!nodes.length) {
+      return;
+    }
+    const rect = scroller.getBoundingClientRect();
+    const marker = rect.top + Math.min(rect.height * .3, 230);
+    let next = nodes[0].dataset.turnId;
+    for (const node of nodes) {
+      if (node.getBoundingClientRect().top > marker) {
+        break;
+      }
+      next = node.dataset.turnId;
+    }
+    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 12) {
+      next = nodes.at(-1).dataset.turnId;
+    }
+    setActiveId((current) => current === next ? current : next);
+  }, [scrollerRef]);
+
+  const schedule = useCallback(() => {
+    if (!updateRafRef.current) {
+      updateRafRef.current = requestAnimationFrame(update);
+    }
+  }, [update]);
+
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) {
       return undefined;
     }
-    const update = () => {
-      updateRafRef.current = 0;
-      const nodes = [...scroller.querySelectorAll(".message[data-turn-id]")];
-      if (!nodes.length) {
-        return;
-      }
-      const rect = scroller.getBoundingClientRect();
-      const marker = rect.top + Math.min(rect.height * .3, 230);
-      let next = nodes[0].dataset.turnId;
-      for (const node of nodes) {
-        if (node.getBoundingClientRect().top > marker) {
-          break;
-        }
-        next = node.dataset.turnId;
-      }
-      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 12) {
-        next = nodes.at(-1).dataset.turnId;
-      }
-      setActiveId((current) => current === next ? current : next);
-    };
-    const schedule = () => {
-      if (!updateRafRef.current) {
-        updateRafRef.current = requestAnimationFrame(update);
-      }
-    };
     scroller.addEventListener("scroll", schedule, { passive: true });
     const observer = new ResizeObserver(schedule);
     observer.observe(scroller);
@@ -3668,9 +3835,14 @@ const TurnNavigator = ({ turns, scrollerRef }) => {
       observer.disconnect();
       if (updateRafRef.current) {
         cancelAnimationFrame(updateRafRef.current);
+        updateRafRef.current = 0;
       }
     };
-  }, [scrollerRef, turns]);
+  }, [scrollerRef, schedule]);
+
+  useEffect(() => {
+    schedule();
+  }, [turns, schedule]);
 
   useEffect(() => () => {
     clearTimeout(previewTimerRef.current);
@@ -4128,6 +4300,17 @@ const FolderSearchIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const CombineIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M14 3a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1" />
+    <path d="M19 3a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1" />
+    <path d="m7 15 3 3" />
+    <path d="m7 21 3-3H5a2 2 0 0 1-2-2v-2" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+  </svg>
+);
+
 const ListIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="M3 5h.01" /><path d="M3 12h.01" /><path d="M3 19h.01" />
@@ -4551,52 +4734,123 @@ const BackgroundTaskCard = ({ task, onTranscript }) => {
   );
 };
 
-const AgentTranscriptEntry = ({ entry }) => {
-  if (entry.type === "prompt") {
-    return (
-      <section className="agent-transcript-prompt">
-        <div className="agent-transcript-label">{t("agent.prompt")}</div>
-        <div className="markdown"><MarkdownMessage content={entry.text || ""} /></div>
-      </section>
-    );
+const parseTranscriptArgs = (raw) => {
+  if (raw == null) {
+    return {};
   }
-  if (entry.type === "text") {
-    return entry.text ? <div className="agent-transcript-text markdown"><MarkdownMessage content={entry.text} /></div> : null;
+  if (typeof raw === "object") {
+    return raw;
   }
-  if (entry.type === "system") {
-    return <div className="agent-transcript-system"><LoaderIcon size={12} />{entry.text}</div>;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
   }
-  if (entry.type === "error") {
-    return <div className="agent-transcript-error">{entry.text}</div>;
+};
+
+const synthTranscriptResult = (name, args, status, text) => {
+  const lower = String(name || "").toLowerCase();
+  if (status === "running") {
+    const result = { running: true };
+    if (args?.command) {
+      result.command = args.command;
+    }
+    return result;
   }
-  if (entry.type === "tool") {
-    return (
-      <details className="agent-transcript-tool" open={entry.status === "running"}>
-        <summary>
-          <Terminal size={13} />
-          <span>{entry.name}</span>
-          {entry.status === "running" && <LoaderIcon size={12} className="running-spinner" />}
-        </summary>
-        {entry.args && <pre>{entry.args}</pre>}
-      </details>
-    );
+  if (status === "denied") {
+    return { denied: true, note: text || "" };
   }
-  if (entry.type === "tool_result") {
-    return (
-      <details className={`agent-transcript-result is-${entry.status || "completed"}`}>
-        <summary>
-          <CircleCheck size={13} />
-          <span>{entry.name}</span>
-          <small>{entry.status}</small>
-        </summary>
-        {entry.text && <pre>{entry.text}</pre>}
-      </details>
-    );
+  if (status === "failed") {
+    return { error: text || "" };
   }
-  if (entry.type === "progress") {
-    return entry.text ? <pre className="agent-transcript-progress">{entry.text}</pre> : null;
+  if (lower === "read_file" && (args?.path || args?.file)) {
+    return { path: args.path || args.file, content: text || "" };
   }
-  return null;
+  if (lower === "run_command") {
+    return { command: args?.command || "", exitCode: 0, stdout: text || "" };
+  }
+  if (lower.startsWith("mcp__")) {
+    return { mcp: true, stdout: text || "" };
+  }
+  const result = {};
+  const path = args?.path || args?.file;
+  if (path) {
+    result.path = path;
+  }
+  if (args?.query) {
+    result.query = args.query;
+  }
+  if (text) {
+    result.stdout = text;
+  }
+  return result;
+};
+
+// flat agent transcript entries -> the main-chat segment shape so the same WorkLog renders both
+const transcriptToWork = (entries, run) => {
+  const list = Array.isArray(entries) ? entries : [];
+  let promptText = "";
+  const segments = [];
+  const toolById = new Map();
+  for (const entry of list) {
+    if (entry.type === "prompt") {
+      promptText = entry.text || "";
+      continue;
+    }
+    if (entry.type === "text") {
+      if ((entry.text || "").trim()) {
+        segments.push({ type: "text", content: entry.text, final: Boolean(entry.final) });
+      }
+      continue;
+    }
+    if (entry.type === "system") {
+      if ((entry.text || "").trim()) {
+        segments.push({ type: "text", content: `*${entry.text}*` });
+      }
+      continue;
+    }
+    if (entry.type === "error") {
+      if ((entry.text || "").trim()) {
+        segments.push({ type: "text", content: entry.text, final: true });
+      }
+      continue;
+    }
+    if (entry.type === "tool") {
+      const args = parseTranscriptArgs(entry.args);
+      const tool = { id: entry.id, name: entry.name, args, result: synthTranscriptResult(entry.name, args, entry.status || "running", "") };
+      toolById.set(entry.id, tool);
+      segments.push({ type: "tool", tool });
+      continue;
+    }
+    if (entry.type === "tool_result") {
+      const parent = toolById.get(entry.parentId);
+      if (parent) {
+        parent.result = synthTranscriptResult(parent.name, parent.args, entry.status || "completed", entry.text || "");
+      } else {
+        segments.push({ type: "tool", tool: { id: entry.id, name: entry.name, args: {}, result: synthTranscriptResult(entry.name, {}, entry.status || "completed", entry.text || "") } });
+      }
+      continue;
+    }
+    if (entry.type === "progress") {
+      const parent = toolById.get(entry.parentId);
+      if (parent && parent.result?.running) {
+        parent.result.stdout = entry.text || "";
+      }
+    }
+  }
+  let cut = segments.length;
+  while (cut > 0 && segments[cut - 1].type === "text") {
+    cut -= 1;
+  }
+  const trailing = segments.slice(cut).filter((seg) => (seg.content || "").trim());
+  const workSegs = segments.slice(0, cut);
+  const hasWork = workSegs.some((seg) => seg.type === "tool");
+  let finalText = trailing.map((seg) => seg.content).join("\n\n");
+  if (!finalText && run && run.status !== "running" && (run.report || "").trim()) {
+    finalText = run.report;
+  }
+  return { promptText, workSegs, hasWork, finalText };
 };
 
 const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
@@ -4620,6 +4874,10 @@ const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
       if (event?.agentId !== (task.agentId || task.id)) {
         return;
       }
+      if (event.type === "narration") {
+        getAgentNarrationStore(task.agentId || task.id).enqueueLive(event.runId, event.lines, event.pauseAfter);
+        return;
+      }
       if (event.runId && runId && event.runId !== runId) {
         return;
       }
@@ -4638,6 +4896,12 @@ const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
   }, [entries.length, lastEntry?.text?.length]);
+  const work = useMemo(() => transcriptToWork(entries, data?.run), [entries, data?.run?.status, data?.run?.report]);
+  const agentStore = getAgentNarrationStore(task.agentId || task.id);
+  const working = (data?.run?.status || task.status) === "running";
+  const startedMs = data?.run?.startedAt ? new Date(data.run.startedAt).getTime() : Date.now();
+  const finishedMs = data?.run?.finishedAt ? new Date(data.run.finishedAt).getTime() : Date.now();
+  const workMs = data?.run?.durationMs || Math.max(1, finishedMs - startedMs);
   return (
     <aside className="background-panel agent-transcript-panel">
       <div className="background-head agent-transcript-head">
@@ -4672,7 +4936,26 @@ const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
           stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
         }}
       >
-        {entries.map((entry) => <AgentTranscriptEntry key={entry.id} entry={entry} />)}
+        {Boolean(work.promptText) && (
+          <div className="message user">
+            <div className="message-surface user-surface">
+              <div className="message-text plain">{work.promptText}</div>
+            </div>
+          </div>
+        )}
+        {(work.hasWork || Boolean(work.finalText) || working) && (
+          <div className="message assistant">
+            <div className="message-surface assistant-surface">
+              {work.hasWork && <WorkLog segments={work.workSegs} startedAt={startedMs} workMs={workMs} working={working} liveTool={null} hasPlan={false} />}
+              {work.hasWork
+                ? (Boolean(work.finalText) && <div className="message-text markdown"><MarkdownMessage content={work.finalText} /></div>)
+                : (working
+                    ? <Thinking store={agentStore} />
+                    : (Boolean(work.finalText) && <div className="message-text markdown"><MarkdownMessage content={work.finalText} /></div>))}
+              {work.hasWork && working && <NarrationRow store={agentStore} />}
+            </div>
+          </div>
+        )}
         {!entries.length && <div className="background-empty">{t("agent.noTranscript")}</div>}
       </div>
     </aside>
@@ -4796,6 +5079,40 @@ const AttachmentImage = ({ attachment }) => {
     return null;
   }
   return <img src={src} alt="" />;
+};
+
+const Lightbox = ({ item, onClose }) => {
+  const [src, setSrc] = useState(() => (item && (item.dataUrl || imageDataUrlCache.get(item.name))) || "");
+  useEffect(() => {
+    const cached = (item && (item.dataUrl || imageDataUrlCache.get(item.name))) || "";
+    setSrc(cached);
+    if (cached || !item?.name) {
+      return undefined;
+    }
+    let alive = true;
+    api.loadImage(item.name).then((res) => {
+      if (alive && res && res.dataUrl) {
+        imageDataUrlCache.set(item.name, res.dataUrl);
+        setSrc(res.dataUrl);
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [item]);
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="lightbox" onClick={onClose}>
+      {src && <img className="lightbox-img" src={src} alt="" onClick={(event) => event.stopPropagation()} />}
+      <button type="button" className="lightbox-close" onClick={onClose}><X size={20} /></button>
+    </div>
+  );
 };
 
 const CompressingOverlay = () => (
@@ -4958,8 +5275,8 @@ const PlanBlockedNote = ({ tool, hasPlan }) => (
   </div>
 );
 
-const Thinking = () => {
-  const label = useLiveLabel();
+const Thinking = ({ store } = {}) => {
+  const label = useLiveLabel(store);
   return (
     <div className="thinking">
       <span className="live-label" data-shimmer-label={label}>{label}</span>
@@ -5039,6 +5356,9 @@ const clusterKind = (tool) => {
   if ((tool.name || "").startsWith("mcp__") || result.mcp) {
     return "mcp";
   }
+  if (tool.name === "grep_files") {
+    return "searches";
+  }
   return null;
 };
 
@@ -5069,16 +5389,31 @@ const groupWorkSegments = (segments) => {
     const kind = clusterKind(tool);
     if (kind) {
       const last = blocks[blocks.length - 1];
-      if (last && last.kind === kind) {
+      if (last && last.kind === "bundle") {
         last.tools.push(tool);
       } else {
-        blocks.push({ kind, tools: [tool] });
+        blocks.push({ kind: "bundle", tools: [tool] });
       }
     } else {
       blocks.push({ kind: "tool", tool });
     }
   }
   return blocks;
+};
+
+const PREVIEW_MAX_LINES = 100;
+const PreBlock = ({ text, className }) => {
+  const raw = String(text ?? "");
+  const lines = raw.split("\n");
+  if (lines.length <= PREVIEW_MAX_LINES) {
+    return <pre className={className}>{raw}</pre>;
+  }
+  return (
+    <>
+      <pre className={className}>{lines.slice(0, PREVIEW_MAX_LINES).join("\n")}</pre>
+      <div className="tool-meta preview-more">{t("preview.more", { n: lines.length - PREVIEW_MAX_LINES })}</div>
+    </>
+  );
 };
 
 const DiffView = ({ diff }) => {
@@ -5126,37 +5461,117 @@ const EditGroup = ({ tools }) => (
   </details>
 );
 
+const clusterRowBase = (path) => {
+  const str = String(path || "");
+  return str.split(/[\\/]/).pop() || str;
+};
+
+const clusterRowLabel = (tool) => {
+  const result = tool.result || {};
+  const name = (tool.name || "").toLowerCase();
+  const path = result.path || tool.args?.path || tool.args?.file;
+  if (isEditTool(tool)) {
+    return t("row.edited", { x: clusterRowBase(path) });
+  }
+  if (name === "read_file" && path) {
+    return t("row.read", { x: clusterRowBase(path) });
+  }
+  if (name === "grep_files") {
+    return t("row.searched", { x: tool.args?.query || result.query || "" });
+  }
+  if (name === "run_command") {
+    return result.command || tool.args?.command || getToolLabel(tool);
+  }
+  return getToolLabel(tool);
+};
+
+const clusterRowMeta = (tool) => {
+  const result = tool.result || {};
+  const name = (tool.name || "").toLowerCase();
+  if (isEditTool(tool)) {
+    const diff = result.diff || {};
+    return `+${diff.added ?? 0} −${diff.removed ?? 0}`;
+  }
+  if (name === "read_file") {
+    const start = Number(result.startLine ?? tool.args?.start_line) || 0;
+    let end = Number(result.endLine) || 0;
+    if (!end && start && tool.args?.limit) {
+      end = start + Number(tool.args.limit) - 1;
+    }
+    if (start && end) {
+      return `${start}-${end}`;
+    }
+    if (start) {
+      return String(start);
+    }
+  }
+  return "";
+};
+
 const ClusterRow = ({ tool }) => {
   const result = tool.result || {};
-  const command = result.command || tool.args?.command;
-  const label = command || tool.result?.path || tool.args?.path || getToolLabel(tool);
+  const label = clusterRowLabel(tool);
+  const meta = clusterRowMeta(tool);
+  const diff = isEditTool(tool) ? result.diff : null;
   return (
     <details className="cluster-row">
       <summary>
         <span className="cluster-row-label">{label}</span>
+        {meta && <span className="cluster-row-meta">{meta}</span>}
         <ChevronRight size={12} className="edit-chevron" />
       </summary>
       <div className="cluster-row-body">
-        {result.content && <pre>{result.content}</pre>}
-        {result.stdout && <pre>{result.stdout}</pre>}
-        {result.stderr && <pre className="stderr">{result.stderr}</pre>}
-        {!result.content && !result.stdout && !result.stderr && <div className="tool-meta">{getToolLabel(tool)}</div>}
+        {diff && <DiffView diff={diff} />}
+        {!diff && result.content && <PreBlock text={result.content} />}
+        {!diff && result.stdout && <PreBlock text={result.stdout} />}
+        {!diff && result.stderr && <PreBlock text={result.stderr} className="stderr" />}
+        {!diff && !result.content && !result.stdout && !result.stderr && <div className="tool-meta">{getToolLabel(tool)}</div>}
       </div>
     </details>
   );
 };
 
 const CommandGroup = ({ tools, kind }) => {
-  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : FolderSearchIcon;
+  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : FolderSearchIcon;
   const label = kind === "commands"
     ? t("cluster.commands", { n: tools.length })
     : kind === "mcp"
       ? t("cluster.mcp", { n: tools.length })
-      : t("cluster.reads", { n: tools.length });
+      : kind === "searches"
+        ? t("cluster.searches", { n: tools.length })
+        : t("cluster.reads", { n: tools.length });
   return (
     <details className="cmd-group">
       <summary>
         <Icon size={14} />
+        <span>{label}</span>
+        <ChevronRight size={13} className="edit-chevron" />
+      </summary>
+      <div className="cmd-group-body">
+        {tools.map((tool, idx) => <ClusterRow tool={tool} key={tool.id || idx} />)}
+      </div>
+    </details>
+  );
+};
+
+const CombineGroup = ({ tools }) => {
+  const order = [];
+  const counts = {};
+  for (const tool of tools) {
+    const kind = clusterKind(tool) || "reads";
+    if (!(kind in counts)) {
+      order.push(kind);
+    }
+    counts[kind] = (counts[kind] || 0) + 1;
+  }
+  const label = order
+    .map((kind) => t(`combine.${kind}.${counts[kind] === 1 ? "one" : "other"}`, { n: counts[kind] }))
+    .join(", ")
+    .replace(/^./, (char) => char.toUpperCase());
+  return (
+    <details className="cmd-group">
+      <summary>
+        <CombineIcon size={14} className="combine-marker" />
         <span>{label}</span>
         <ChevronRight size={13} className="edit-chevron" />
       </summary>
@@ -5333,10 +5748,10 @@ const ToolStep = ({ tool }) => {
         {Array.isArray(result.matches) && (result.matches.length
           ? <pre>{result.matches.slice(0, 100).map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")}</pre>
           : <div className="tool-meta">{t("grep.noMatches")}</div>)}
-        {result.stdout && <pre>{result.stdout}</pre>}
-        {result.stderr && <pre className="stderr">{result.stderr}</pre>}
-        {result.content && <pre>{result.content}</pre>}
-        {result.analysis && <pre>{result.analysis}</pre>}
+        {result.stdout && <PreBlock text={result.stdout} />}
+        {result.stderr && <PreBlock text={result.stderr} className="stderr" />}
+        {result.content && <PreBlock text={result.content} />}
+        {result.analysis && <PreBlock text={result.analysis} />}
         {result.memory && result.text && <div className="tool-command">{result.text}</div>}
         {Array.isArray(result.memories) && (result.memories.length
           ? <pre>{result.memories.slice(0, 300).map((m) => `(${m.id}) ${m.text}`).join("\n")}</pre>
@@ -5471,8 +5886,8 @@ const WebSearchStep = ({ tool }) => {
   );
 };
 
-const NarrationRow = () => {
-  const label = useLiveLabel();
+const NarrationRow = ({ store } = {}) => {
+  const label = useLiveLabel(store);
   return (
     <div className="running-head narration-row">
       <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
@@ -5514,10 +5929,21 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
           if (block.kind === "edits") {
             return <EditGroup tools={block.tools} key={key} />;
           }
-          if (block.kind === "commands" || block.kind === "reads" || block.kind === "mcp") {
-            return block.tools.length === 1
-              ? <ToolStep tool={block.tools[0]} key={key} />
-              : <CommandGroup tools={block.tools} kind={block.kind} key={key} />;
+          if (block.kind === "bundle") {
+            if (block.tools.length === 1) {
+              const only = block.tools[0];
+              return isEditTool(only)
+                ? <EditGroup tools={[only]} key={key} />
+                : <ToolStep tool={only} key={key} />;
+            }
+            const kinds = new Set(block.tools.map((tool) => clusterKind(tool)));
+            if (kinds.size === 1) {
+              const onlyKind = [...kinds][0];
+              return onlyKind === "edits"
+                ? <EditGroup tools={block.tools} key={key} />
+                : <CommandGroup tools={block.tools} kind={onlyKind} key={key} />;
+            }
+            return <CombineGroup tools={block.tools} key={key} />;
           }
           if (block.kind === "planBlocked") {
             return <PlanBlockedNote tool={block.tool} hasPlan={hasPlan} key={key} />;
@@ -5582,7 +6008,7 @@ const FileChangesCard = ({ message, projectPath, onUndo, onReveal }) => {
   );
 };
 
-const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy, projectPath, onUndoTurn, onReveal, onFork }) => {
+const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdit, onCancelEdit, onSubmitEdit, busy, projectPath, onUndoTurn, onReveal, onFork, onImageClick }) => {
   const sawWorkingRef = useRef(false);
   const [draft, setDraft] = useState(message.content || "");
   const [copied, setCopied] = useState(false);
@@ -5630,10 +6056,13 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
     return (
       <div className="message user" data-turn-id={navId || undefined}>
         <div className="message-surface user-surface">
-          {message.attachment && (
-            <div className="message-image">
-              <AttachmentImage attachment={message.attachment} />
-              <span>{message.attachment.name}</span>
+          {messageAttachments(message).length > 0 && (
+            <div className="message-images">
+              {messageAttachments(message).map((att, i) => (
+                <button type="button" className="message-thumb" key={att.name || i} onClick={() => onImageClick?.(att)}>
+                  <AttachmentImage attachment={att} />
+                </button>
+              ))}
             </div>
           )}
           <div className="message-text plain">{message.content}</div>
@@ -5722,7 +6151,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
 
 const getToolIcon = (name = "") => {
   const lower = name.toLowerCase();
-  if (lower === "start_background_task" || lower === "get_background_task" || lower === "deploy_agent" || lower === "continue_agent") {
+  if (lower === "start_background_task" || lower === "get_background_task" || lower === "get_agent_status" || lower === "deploy_agent" || lower === "continue_agent") {
     return GitBranchPlusIcon;
   }
   if (lower === "web_search") {
@@ -5770,6 +6199,9 @@ const getToolLabel = (tool) => {
   }
   if (name === "get_background_task") {
     return result.name || t("background.title");
+  }
+  if (name === "get_agent_status") {
+    return t("toollabel.agentStatus", { x: result.name || tool.args?.agent_id || "" });
   }
   if (name === "datetime") {
     return t("toollabel.datetime");
@@ -5871,8 +6303,8 @@ const ToolTimeline = ({ tools }) => (
               {Array.isArray(result.matches) && (result.matches.length
                 ? <pre>{result.matches.slice(0, 100).map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")}</pre>
                 : <div className="tool-meta">{t("grep.noMatches")}</div>)}
-              {result.stdout && <pre>{result.stdout}</pre>}
-              {result.stderr && <pre className="stderr">{result.stderr}</pre>}
+              {result.stdout && <PreBlock text={result.stdout} />}
+              {result.stderr && <PreBlock text={result.stderr} className="stderr" />}
               {!result.stdout && !result.stderr && !result.error && !result.matches && <pre>{JSON.stringify({ args: tool.args, result: tool.result }, null, 2)}</pre>}
             </div>
           </details>

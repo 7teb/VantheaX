@@ -3,8 +3,11 @@ import { contextBridge, ipcRenderer } from "electron";
 contextBridge.exposeInMainWorld("agentApi", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (settings) => ipcRenderer.invoke("settings:save", settings),
-  loadChats: () => ipcRenderer.invoke("chats:load"),
-  saveChats: (chats) => ipcRenderer.invoke("chats:save", chats),
+  loadChats: (activeId) => ipcRenderer.invoke("chats:load", activeId),
+  loadChat: (chatId) => ipcRenderer.invoke("chats:get", chatId),
+  saveChat: (chat) => ipcRenderer.invoke("chats:save", chat),
+  importChats: (chats) => ipcRenderer.invoke("chats:import", chats),
+  deleteChat: (chatId) => ipcRenderer.invoke("chats:delete", chatId),
   listBackgroundTasks: (chatId) => ipcRenderer.invoke("background:list", chatId),
   getBackgroundTask: (id) => ipcRenderer.invoke("background:get", id),
   cancelBackgroundTask: (id) => ipcRenderer.invoke("background:cancel", id),
