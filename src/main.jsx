@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleAlert, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -185,6 +185,9 @@ const STRINGS = {
     "inspector.noFile": "No file selected",
     "inspector.previewHint": "Select a file to preview its first 500 lines.",
     "settings.title": "Settings",
+    "settings.back": "Back to app",
+    "settings.search": "Search settings",
+    "settings.noResults": "No settings found",
     "settings.apiKey": "OpenRouter API key",
     "settings.stored": "Stored locally",
     "settings.saveKey": "Save key",
@@ -566,6 +569,9 @@ const STRINGS = {
     "inspector.noFile": "Keine Datei gewählt",
     "inspector.previewHint": "Wähle eine Datei für eine Vorschau der ersten 500 Zeilen.",
     "settings.title": "Einstellungen",
+    "settings.back": "Zurück zur App",
+    "settings.search": "Einstellungen durchsuchen",
+    "settings.noResults": "Keine Einstellungen gefunden",
     "settings.apiKey": "OpenRouter-API-Key",
     "settings.stored": "Lokal gespeichert",
     "settings.saveKey": "Key speichern",
@@ -6809,34 +6815,40 @@ const WebSearchSettings = ({ config, hasKey, onChange, onSaveKey }) => {
   return (
     <div className="web-settings">
       <div className="modal-title"><GlobeCheckIcon size={19} />{t("settings.tabWebSearch")}</div>
-      <div className="web-row">
-        <span className="web-enable-label">{t("web.enable")}</span>
-        <span className={cfg.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onChange({ enabled: !cfg.enabled })} />
-      </div>
-      <div className="web-field">
-        <label className="field-label">{t("web.key")}</label>
-        <input className="text-input" type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} placeholder={hasKey ? t("settings.stored") : "tvly-..."} />
-        <button type="button" className="web-save" onClick={save}><Check size={16} /><span>{t("settings.saveKey")}</span></button>
-      </div>
-      <div className="web-field">
-        <label className="field-label">{t("web.results")}</label>
-        <div className="web-slider-row">
-          <input className="web-slider" type="range" min="1" max="20" step="1" value={clamped} style={sliderStyle} onChange={(event) => onChange({ maxResults: Number(event.target.value) })} />
-          <span className="web-slider-val">{clamped}</span>
+      <div className="settings-section-card">
+        <div className="web-row">
+          <span className="web-enable-label">{t("web.enable")}</span>
+          <span className={cfg.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onChange({ enabled: !cfg.enabled })} />
+        </div>
+        <div className="web-field">
+          <label className="field-label">{t("web.key")}</label>
+          <div className="settings-key-row">
+            <input className="text-input" type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} placeholder={hasKey ? t("settings.stored") : "tvly-..."} />
+            <button type="button" className="settings-key-save" onClick={save}><Check size={15} /><span>{t("settings.saveKey")}</span></button>
+          </div>
         </div>
       </div>
-      <div className="web-row">
-        <span className="field-label">{t("web.depth")}</span>
-        <div className="web-seg">
-          <button type="button" className={cfg.searchDepth === "basic" ? "is-on" : ""} onClick={() => onChange({ searchDepth: "basic" })}>{t("web.depthBasic")}</button>
-          <button type="button" className={cfg.searchDepth === "advanced" ? "is-on" : ""} onClick={() => onChange({ searchDepth: "advanced" })}>{t("web.depthAdvanced")}</button>
+      <div className="settings-section-card">
+        <div className="web-field">
+          <label className="field-label">{t("web.results")}</label>
+          <div className="web-slider-row">
+            <input className="web-slider" type="range" min="1" max="20" step="1" value={clamped} style={sliderStyle} onChange={(event) => onChange({ maxResults: Number(event.target.value) })} />
+            <span className="web-slider-val">{clamped}</span>
+          </div>
         </div>
-      </div>
-      <div className="web-row">
-        <span className="field-label">{t("web.topic")}</span>
-        <div className="web-seg">
-          <button type="button" className={cfg.topic === "general" ? "is-on" : ""} onClick={() => onChange({ topic: "general" })}>{t("web.topicGeneral")}</button>
-          <button type="button" className={cfg.topic === "news" ? "is-on" : ""} onClick={() => onChange({ topic: "news" })}>{t("web.topicNews")}</button>
+        <div className="web-row">
+          <span className="field-label">{t("web.depth")}</span>
+          <div className="web-seg">
+            <button type="button" className={cfg.searchDepth === "basic" ? "is-on" : ""} onClick={() => onChange({ searchDepth: "basic" })}>{t("web.depthBasic")}</button>
+            <button type="button" className={cfg.searchDepth === "advanced" ? "is-on" : ""} onClick={() => onChange({ searchDepth: "advanced" })}>{t("web.depthAdvanced")}</button>
+          </div>
+        </div>
+        <div className="web-row">
+          <span className="field-label">{t("web.topic")}</span>
+          <div className="web-seg">
+            <button type="button" className={cfg.topic === "general" ? "is-on" : ""} onClick={() => onChange({ topic: "general" })}>{t("web.topicGeneral")}</button>
+            <button type="button" className={cfg.topic === "news" ? "is-on" : ""} onClick={() => onChange({ topic: "news" })}>{t("web.topicNews")}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -6860,50 +6872,61 @@ const ModelEvalSettings = ({ config, hasKey, models, onChange, onSaveKey }) => {
   };
   return (
     <div className="web-settings">
-      <div className="modal-title"><GripIcon size={19} />{t("settings.tabModelEval")}</div>
-      <p className="eval-intro">{t("eval.intro")}</p>
-      <div className="web-row">
-        <span className="web-enable-label">{t("eval.enable")}</span>
-        <span className={cfg.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onChange({ enabled: !cfg.enabled })} />
-      </div>
-      <div className="web-field">
-        <label className="field-label">{t("eval.key")}</label>
-        <input className="text-input" type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} placeholder={hasKey ? t("settings.stored") : "nvapi-..."} />
-        <button type="button" className="web-save" onClick={save}><Check size={16} /><span>{t("settings.saveKey")}</span></button>
-        <button type="button" className="eval-link" onClick={() => api.openExternal("https://build.nvidia.com/settings/api-keys")}>{t("eval.getKey")}</button>
-      </div>
-      <div className="eval-section-label">{t("eval.params")}</div>
-      <div className="eval-grid">
-        <div className="eval-field">
-          <label className="field-label">{t("eval.temperature")}</label>
-          <input className="text-input" type="number" min="0.01" max="1" step="0.05" value={cfg.temperature} onChange={(event) => onChange({ temperature: num(event.target.value, 0.01, 1, 0.2) })} />
-        </div>
-        <div className="eval-field">
-          <label className="field-label">{t("eval.topP")}</label>
-          <input className="text-input" type="number" min="0.01" max="1" step="0.05" value={cfg.topP} onChange={(event) => onChange({ topP: num(event.target.value, 0.01, 1, 1) })} />
-          <small className="eval-hint">{t("eval.topPHint")}</small>
-        </div>
-        <div className="eval-field">
-          <label className="field-label">{t("eval.maxTokens")}</label>
-          <input className="text-input" type="number" min="1" max="65536" step="1024" value={cfg.maxTokens} onChange={(event) => onChange({ maxTokens: Math.round(num(event.target.value, 1, 65536, 16384)) })} />
-          <small className="eval-hint">{t("eval.maxHint")}</small>
-        </div>
-        <div className="eval-field">
-          <label className="field-label">{t("eval.budget")}</label>
-          <input className="text-input" type="number" min="-1" max="32768" step="1024" value={cfg.reasoningBudget} onChange={(event) => onChange({ reasoningBudget: Math.round(num(event.target.value, -1, 32768, 16384)) })} />
-          <small className="eval-hint">{t("eval.budgetHint")}</small>
+      <div className="settings-title-row">
+        <div className="modal-title"><GripIcon size={19} />{t("settings.tabModelEval")}</div>
+        <div className="eval-info">
+          <button type="button" className="eval-info-button" aria-label={t("eval.intro")}><CircleAlert size={17} /></button>
+          <div className="eval-info-tooltip" role="tooltip">{t("eval.intro")}</div>
         </div>
       </div>
-      <div className="eval-section-label">{t("eval.models")}</div>
-      <ul className="eval-models">
-        {nvModels.map((model) => (
-          <li key={model.id}>
-            <span className="eval-model-name">{model.label}</span>
-            <code>{model.apiId}</code>
-            <span className="eval-model-efforts">{(model.efforts || []).map(effortLabel).join(" / ")}</span>
-          </li>
-        ))}
-      </ul>
+      <div className="settings-section-card">
+        <div className="web-row">
+          <span className="web-enable-label">{t("eval.enable")}</span>
+          <span className={cfg.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => onChange({ enabled: !cfg.enabled })} />
+        </div>
+        <div className="web-field">
+          <label className="field-label">{t("eval.key")}</label>
+          <div className="settings-key-row">
+            <input className="text-input" type="password" value={keyInput} onChange={(event) => setKeyInput(event.target.value)} placeholder={hasKey ? t("settings.stored") : "nvapi-..."} />
+            <button type="button" className="settings-key-save" onClick={save}><Check size={15} /><span>{t("settings.saveKey")}</span></button>
+          </div>
+          <button type="button" className="eval-link" onClick={() => api.openExternal("https://build.nvidia.com/settings/api-keys")}>{t("eval.getKey")}</button>
+        </div>
+      </div>
+      <div className="settings-section-card">
+        <div className="eval-section-label">{t("eval.params")}</div>
+        <div className="eval-grid">
+          <div className="eval-field">
+            <label className="field-label">{t("eval.temperature")}</label>
+            <input className="text-input" type="number" min="0.01" max="1" step="0.05" value={cfg.temperature} onChange={(event) => onChange({ temperature: num(event.target.value, 0.01, 1, 0.2) })} />
+          </div>
+          <div className="eval-field">
+            <label className="field-label">{t("eval.topP")}</label>
+            <input className="text-input" type="number" min="0.01" max="1" step="0.05" value={cfg.topP} onChange={(event) => onChange({ topP: num(event.target.value, 0.01, 1, 1) })} />
+            <small className="eval-hint">{t("eval.topPHint")}</small>
+          </div>
+          <div className="eval-field">
+            <label className="field-label">{t("eval.maxTokens")}</label>
+            <input className="text-input" type="number" min="1" max="65536" step="1024" value={cfg.maxTokens} onChange={(event) => onChange({ maxTokens: Math.round(num(event.target.value, 1, 65536, 16384)) })} />
+            <small className="eval-hint">{t("eval.maxHint")}</small>
+          </div>
+          <div className="eval-field">
+            <label className="field-label">{t("eval.budget")}</label>
+            <input className="text-input" type="number" min="-1" max="32768" step="1024" value={cfg.reasoningBudget} onChange={(event) => onChange({ reasoningBudget: Math.round(num(event.target.value, -1, 32768, 16384)) })} />
+            <small className="eval-hint">{t("eval.budgetHint")}</small>
+          </div>
+        </div>
+        <div className="eval-section-label">{t("eval.models")}</div>
+        <ul className="eval-models">
+          {nvModels.map((model) => (
+            <li key={model.id}>
+              <span className="eval-model-name">{model.label}</span>
+              <code>{model.apiId}</code>
+              <span className="eval-model-efforts">{(model.efforts || []).map(effortLabel).join(" / ")}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 };
@@ -6975,79 +6998,119 @@ const DesignSettings = ({ theme, onChange }) => {
     </div>
   );
   return (
-    <>
+    <div className="settings-panel">
       <div className="modal-title"><SunIcon size={19} />{t("settings.tabDesign")}</div>
-      <div className="design-row">
-        <span className="design-row-label">{t("design.preset")}</span>
-        <ThemeSelect value={t0.preset} options={THEME_PRESETS} onChange={applyPreset} swatch={(item) => (item ? item.accent : "transparent")} />
-      </div>
-      {colorRow("design.accent", "accent")}
-      {chromeColorRow}
-      {colorRow("design.background", "surfaceChat")}
-      {colorRow("design.text", "text")}
-      <div className="design-row">
-        <span className="design-row-label">{t("design.fontUi")}</span>
-        <ThemeSelect value={t0.fontUi} options={UI_FONTS} onChange={(id) => onChange({ fontUi: id })} />
-      </div>
-      <div className="design-row">
-        <span className="design-row-label">{t("design.fontCode")}</span>
-        <ThemeSelect value={t0.fontMono} options={MONO_FONTS} onChange={(id) => onChange({ fontMono: id })} />
-      </div>
-      <div className="design-row">
-        <span className="design-row-label">{t("design.contrast")}</span>
-        <div className="design-slider-wrap">
-          <input type="range" className="web-slider" min="0" max="100" value={t0.contrast} onChange={(event) => onChange({ contrast: Number(event.target.value) })} style={{ background: `linear-gradient(to right, var(--accent-2) 0%, var(--accent-2) ${t0.contrast}%, rgba(255,255,255,.1) ${t0.contrast}%, rgba(255,255,255,.1) 100%)` }} />
-          <span className="web-slider-val">{t0.contrast}</span>
+      <div className="settings-section-card">
+        <div className="design-row">
+          <span className="design-row-label">{t("design.preset")}</span>
+          <ThemeSelect value={t0.preset} options={THEME_PRESETS} onChange={applyPreset} swatch={(item) => (item ? item.accent : "transparent")} />
         </div>
+        {colorRow("design.accent", "accent")}
+        {chromeColorRow}
+        {colorRow("design.background", "surfaceChat")}
+        {colorRow("design.text", "text")}
+        <div className="design-row">
+          <span className="design-row-label">{t("design.fontUi")}</span>
+          <ThemeSelect value={t0.fontUi} options={UI_FONTS} onChange={(id) => onChange({ fontUi: id })} />
+        </div>
+        <div className="design-row">
+          <span className="design-row-label">{t("design.fontCode")}</span>
+          <ThemeSelect value={t0.fontMono} options={MONO_FONTS} onChange={(id) => onChange({ fontMono: id })} />
+        </div>
+        <div className="design-row">
+          <span className="design-row-label">{t("design.contrast")}</span>
+          <div className="design-slider-wrap">
+            <input type="range" className="web-slider" min="0" max="100" value={t0.contrast} onChange={(event) => onChange({ contrast: Number(event.target.value) })} style={{ background: `linear-gradient(to right, var(--accent-2) 0%, var(--accent-2) ${t0.contrast}%, rgba(255,255,255,.1) ${t0.contrast}%, rgba(255,255,255,.1) 100%)` }} />
+            <span className="web-slider-val">{t0.contrast}</span>
+          </div>
+        </div>
+        <button type="button" className="design-reset" onClick={() => onChange({ ...DEFAULT_THEME })}><Undo2 size={15} />{t("design.reset")}</button>
       </div>
-      <button type="button" className="design-reset" onClick={() => onChange({ ...DEFAULT_THEME })}><Undo2 size={15} />{t("design.reset")}</button>
-    </>
+    </div>
   );
 };
 
 const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang, webSearch, hasTavilyKey, onWebChange, onSaveTavilyKey, personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory, models, nvidia, hasNvidiaKey, onNvidiaChange, onSaveNvidiaKey, theme, onThemeChange }) => {
   const [tab, setTab] = useState("general");
+  const [query, setQuery] = useState("");
+  const tabs = [
+    { id: "general", label: "settings.tabGeneral", Icon: Settings },
+    { id: "design", label: "settings.tabDesign", Icon: SunIcon },
+    { id: "personalization", label: "settings.tabPersonalization", Icon: ShapesIcon },
+    { id: "mcp", label: "settings.tabMcp", Icon: Plug },
+    { id: "websearch", label: "settings.tabWebSearch", Icon: GlobeCheckIcon },
+    { id: "modeleval", label: "settings.tabModelEval", Icon: GripIcon },
+  ];
+  const visibleTabs = tabs.filter((item) => t(item.label).toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="settings-modal tabbed" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="settings-tabs">
-          <button className={tab === "general" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("general")}><Settings size={15} /><span>{t("settings.tabGeneral")}</span></button>
-          <button className={tab === "design" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("design")}><SunIcon size={15} /><span>{t("settings.tabDesign")}</span></button>
-          <button className={tab === "mcp" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("mcp")}><Plug size={15} /><span>{t("settings.tabMcp")}</span></button>
-          <button className={tab === "websearch" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("websearch")}><GlobeCheckIcon size={15} /><span>{t("settings.tabWebSearch")}</span></button>
-          <button className={tab === "personalization" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("personalization")}><ShapesIcon size={15} /><span>{t("settings.tabPersonalization")}</span></button>
-          <button className={tab === "modeleval" ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab("modeleval")}><GripIcon size={15} /><span>{t("settings.tabModelEval")}</span></button>
+    <div className="modal-backdrop settings-backdrop">
+      <div className="settings-modal tabbed settings-page">
+        <div className="settings-page-header">
+          <button type="button" className="settings-back" onClick={onClose}><ChevronLeft size={16} /><span>{t("settings.back")}</span></button>
+          <label className="settings-search">
+            <Search size={15} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("settings.search")} />
+          </label>
+          <div className="settings-page-title"><Settings size={16} /><span>{t("settings.title")}</span></div>
         </div>
-        <div className="settings-content">
-          {tab === "general" ? (
-            <>
-              <div className="modal-title"><KeyRound size={19} />{t("settings.title")}</div>
-              <label className="field-label">{t("settings.language")}</label>
-              <div className="lang-switch">
-                {LANGUAGES.map((item) => (
-                  <button key={item.id} className={item.id === lang ? "lang-option is-active" : "lang-option"} onClick={() => onLang(item.id)}>{item.label}</button>
-                ))}
-              </div>
-              <label className="field-label">{t("settings.apiKey")}</label>
-              <input className="text-input" value={value} onChange={(event) => setValue(event.target.value)} type="password" placeholder={hasKey ? t("settings.stored") : "sk-or-v1-..."} />
-              <button className="primary-command wide" onClick={onSave}><Check size={17} /><span>{t("settings.saveKey")}</span></button>
-              <label className="field-label balance-label">{t("settings.balance")}</label>
-              <BalanceLine hasKey={hasKey} />
-            </>
-          ) : tab === "mcp" ? (
-            <>
-              <div className="modal-title"><Plug size={19} />{t("settings.tabMcp")}</div>
-              <McpSettings />
-            </>
-          ) : tab === "websearch" ? (
-            <WebSearchSettings config={webSearch} hasKey={hasTavilyKey} onChange={onWebChange} onSaveKey={onSaveTavilyKey} />
-          ) : tab === "design" ? (
-            <DesignSettings theme={theme} onChange={onThemeChange} />
-          ) : tab === "modeleval" ? (
-            <ModelEvalSettings config={nvidia} hasKey={hasNvidiaKey} models={models} onChange={onNvidiaChange} onSaveKey={onSaveNvidiaKey} />
-          ) : (
-            <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} narrator={narrator} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onNarratorChange={onNarratorChange} onResetMemory={onResetMemory} />
-          )}
+        <div className="settings-page-body">
+          <div className="settings-tabs">
+            {visibleTabs.map((item) => (
+              <button key={item.id} className={tab === item.id ? "settings-tab is-active" : "settings-tab"} onClick={() => setTab(item.id)}>
+                <item.Icon size={15} />
+                <span>{t(item.label)}</span>
+              </button>
+            ))}
+            {!visibleTabs.length && <div className="settings-no-results">{t("settings.noResults")}</div>}
+          </div>
+          <div className="settings-content">
+            <div className="settings-content-inner">
+              {tab === "general" ? (
+                <div className="settings-panel">
+                  <div className="modal-title"><KeyRound size={19} />{t("settings.tabGeneral")}</div>
+                  <div className="settings-section-card">
+                    <label className="field-label">{t("settings.language")}</label>
+                    <div className="lang-switch">
+                      {LANGUAGES.map((item) => (
+                        <button key={item.id} className={item.id === lang ? "lang-option is-active" : "lang-option"} onClick={() => onLang(item.id)}>{item.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="settings-section-card">
+                    <label className="field-label">{t("settings.apiKey")}</label>
+                    <div className="settings-key-row">
+                      <input className="text-input" value={value} onChange={(event) => setValue(event.target.value)} type="password" placeholder={hasKey ? t("settings.stored") : "sk-or-v1-..."} />
+                      <button className="settings-key-save" onClick={onSave}><Check size={15} /><span>{t("settings.saveKey")}</span></button>
+                    </div>
+                    <label className="field-label balance-label">{t("settings.balance")}</label>
+                    <BalanceLine hasKey={hasKey} />
+                  </div>
+                </div>
+              ) : tab === "mcp" ? (
+                <div className="settings-panel">
+                  <div className="modal-title"><Plug size={19} />{t("settings.tabMcp")}</div>
+                  <div className="settings-section-card"><McpSettings /></div>
+                </div>
+              ) : tab === "websearch" ? (
+                <WebSearchSettings config={webSearch} hasKey={hasTavilyKey} onChange={onWebChange} onSaveKey={onSaveTavilyKey} />
+              ) : tab === "design" ? (
+                <DesignSettings theme={theme} onChange={onThemeChange} />
+              ) : tab === "modeleval" ? (
+                <ModelEvalSettings config={nvidia} hasKey={hasNvidiaKey} models={models} onChange={onNvidiaChange} onSaveKey={onSaveNvidiaKey} />
+              ) : (
+                <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} narrator={narrator} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onNarratorChange={onNarratorChange} onResetMemory={onResetMemory} />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
