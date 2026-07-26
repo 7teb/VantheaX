@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleAlert, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -6719,7 +6719,7 @@ const PersonalityDropdown = ({ value, onChange }) => {
   );
 };
 
-const PersonalizationSettings = ({ personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory }) => {
+const PersonalizationSettings = ({ personality, customInstructions, memory, narrator, onPersonality, onSaveInstructions, onMemChange, onNarratorChange, onResetMemory, showTitle = true }) => {
   const mem = memory || { enabled: false, excludeToolChats: false };
   const nar = narrator || { enabled: false };
   const [ci, setCi] = useState(customInstructions || "");
@@ -6739,7 +6739,7 @@ const PersonalizationSettings = ({ personality, customInstructions, memory, narr
   };
   return (
     <div className="perso-settings">
-      <div className="modal-title"><ShapesIcon size={19} />{t("settings.tabPersonalization")}</div>
+      {showTitle && <div className="modal-title"><ShapesIcon size={19} />{t("settings.tabPersonalization")}</div>}
       <div className="perso-row">
         <div className="perso-row-head">
           <div className="perso-row-title">{t("perso.personality")}</div>
@@ -6875,7 +6875,7 @@ const ModelEvalSettings = ({ config, hasKey, models, onChange, onSaveKey }) => {
       <div className="settings-title-row">
         <div className="modal-title"><GripIcon size={19} />{t("settings.tabModelEval")}</div>
         <div className="eval-info">
-          <button type="button" className="eval-info-button" aria-label={t("eval.intro")}><CircleAlert size={17} /></button>
+          <button type="button" className="eval-info-button" aria-label={t("eval.intro")}><span aria-hidden="true">!</span></button>
           <div className="eval-info-tooltip" role="tooltip">{t("eval.intro")}</div>
         </div>
       </div>
@@ -7036,7 +7036,6 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
   const tabs = [
     { id: "general", label: "settings.tabGeneral", Icon: Settings },
     { id: "design", label: "settings.tabDesign", Icon: SunIcon },
-    { id: "personalization", label: "settings.tabPersonalization", Icon: ShapesIcon },
     { id: "mcp", label: "settings.tabMcp", Icon: Plug },
     { id: "websearch", label: "settings.tabWebSearch", Icon: GlobeCheckIcon },
     { id: "modeleval", label: "settings.tabModelEval", Icon: GripIcon },
@@ -7094,6 +7093,7 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
                     <label className="field-label balance-label">{t("settings.balance")}</label>
                     <BalanceLine hasKey={hasKey} />
                   </div>
+                  <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} narrator={narrator} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onNarratorChange={onNarratorChange} onResetMemory={onResetMemory} showTitle={false} />
                 </div>
               ) : tab === "mcp" ? (
                 <div className="settings-panel">
@@ -7107,7 +7107,7 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
               ) : tab === "modeleval" ? (
                 <ModelEvalSettings config={nvidia} hasKey={hasNvidiaKey} models={models} onChange={onNvidiaChange} onSaveKey={onSaveNvidiaKey} />
               ) : (
-                <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} narrator={narrator} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onNarratorChange={onNarratorChange} onResetMemory={onResetMemory} />
+                null
               )}
             </div>
           </div>
