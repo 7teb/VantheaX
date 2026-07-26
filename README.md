@@ -51,7 +51,7 @@ The side jobs (chat naming, summaries, the Auto-mode safety check, image analysi
 
 ## Permission modes
 
-Every command runs under one of three modes, chosen in the composer:
+Every command runs under one of three modes, set in the model picker under Advanced. A fresh install starts in Auto:
 
 - **Ask**: every command is proposed and waits for you.
 - **Auto**: read-only commands run immediately; everything else goes to a Gemini overseer that judges whether it is safe to run or should ask you first.

@@ -4523,7 +4523,7 @@ const readSettings = async () => {
     },
     model: settings.model || "deepseek/deepseek-v4-flash",
     effort: settings.effort || "high",
-    mode: settings.mode || "ask",
+    mode: settings.mode || "auto",
     language: settings.language || "en",
     projects: settings.projects || [],
     mcpServers: settings.mcpServers || {},

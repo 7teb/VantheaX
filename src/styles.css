@@ -2916,7 +2916,6 @@ textarea {
   width: 248px;
 }
 
-.permission-pill,
 .model-effort-trigger {
   display: inline-flex;
   align-items: center;
@@ -2934,8 +2933,6 @@ textarea {
   transition: background .26s ease-out, color .22s ease-out;
 }
 
-.permission-pill:hover,
-.permission-pill:focus-visible,
 .model-effort-trigger:hover,
 .model-effort-trigger:focus-visible {
   background: var(--hover);
@@ -2943,13 +2940,11 @@ textarea {
   transition-duration: .11s;
 }
 
-.permission-pill:focus-visible,
 .model-effort-trigger:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, .12);
 }
 
-.permission-pill svg,
 .model-effort-trigger svg {
   flex: 0 0 auto;
   color: var(--faint);
@@ -2984,35 +2979,6 @@ textarea {
 
 .model-effort-picker.is-open .model-trigger-chevron {
   transform: rotate(180deg);
-}
-
-.permission-picker {
-  position: relative;
-  display: inline-flex;
-}
-
-.permission-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  z-index: 40;
-  width: 252px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border-radius: 12px;
-  background: var(--surface-3);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, .55);
-}
-
-.permission-menu-title {
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  padding: 6px 8px 8px;
 }
 
 .permission-option {
@@ -4639,7 +4605,6 @@ textarea {
     width: calc(100% - 28px);
   }
 
-  .permission-pill,
   .model-effort-trigger {
     padding: 0 8px;
   }

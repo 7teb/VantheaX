@@ -2035,7 +2035,7 @@ const applyThemeToRoot = (input) => {
 };
 
 const App = () => {
-  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "ask", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, narrator: { enabled: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }, theme: DEFAULT_THEME });
+  const [settings, setSettings] = useState({ model: "deepseek/deepseek-v4-flash", effort: "high", mode: "auto", language: "en", projects: [], personality: "pragmatic", customInstructions: "", memory: { enabled: false, excludeToolChats: false }, narrator: { enabled: false }, webSearch: { enabled: false, maxResults: 5, searchDepth: "basic", topic: "general" }, theme: DEFAULT_THEME });
   const [models, setModels] = useState([]);
   const [projectPath, setProjectPath] = useState("");
   const [editingMessageId, setEditingMessageId] = useState("");
@@ -2069,7 +2069,6 @@ const App = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [permissionOpen, setPermissionOpen] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState(() => { try { return JSON.parse(localStorage.getItem("vantheax:collapsed-projects")) || []; } catch { return []; } });
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [renamingChatId, setRenamingChatId] = useState("");
@@ -2235,7 +2234,6 @@ const App = () => {
       if (event.key === "Escape") {
         setSearchOpen(false);
         setModelOpen(false);
-        setPermissionOpen(false);
         setPlusMenuOpen(false);
         setBrandMenuOpen(false);
         setProjectMenuOpen(false);
@@ -2252,7 +2250,7 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!plusMenuOpen && !brandMenuOpen && !permissionOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !rightPanel && titleMenuOpen === null) {
+    if (!plusMenuOpen && !brandMenuOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !rightPanel && titleMenuOpen === null) {
       return;
     }
     const onDown = (event) => {
@@ -2268,9 +2266,6 @@ const App = () => {
       if (!event.target.closest(".plus-picker")) {
         setPlusMenuOpen(false);
       }
-      if (!event.target.closest(".permission-picker")) {
-        setPermissionOpen(false);
-      }
       if (!event.target.closest(".model-picker")) {
         setModelOpen(false);
       }
@@ -2283,7 +2278,7 @@ const App = () => {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [plusMenuOpen, brandMenuOpen, permissionOpen, modelOpen, projectMenuOpen, chatMenuOpen, rightPanel, titleMenuOpen]);
+  }, [plusMenuOpen, brandMenuOpen, modelOpen, projectMenuOpen, chatMenuOpen, rightPanel, titleMenuOpen]);
 
   useEffect(() => {
     if (!chatsLoadedRef.current || !activeChat || activeChat.messagesLoaded === false) {
@@ -3694,9 +3689,8 @@ const App = () => {
                 <div className="composer-controls">
                   <input ref={fileInputRef} className="hidden-input" type="file" accept="image/*" multiple onChange={onImageSelected} />
                   <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
-                  <PermissionPicker value={settings.mode} open={permissionOpen} onToggle={() => setPermissionOpen(!permissionOpen)} onChange={(mode) => { persistSettings({ mode }); setPermissionOpen(false); }} />
                   <div className="composer-spacer" />
-                  <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} narrator={Boolean(settings.narrator?.enabled)} open={modelOpen} onToggle={() => setModelOpen(!modelOpen)} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} onNarratorChange={(enabled) => persistSettings({ narrator: { ...(settings.narrator || {}), enabled } })} />
+                  <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} narrator={Boolean(settings.narrator?.enabled)} mode={settings.mode} open={modelOpen} onToggle={() => setModelOpen(!modelOpen)} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} onNarratorChange={(enabled) => persistSettings({ narrator: { ...(settings.narrator || {}), enabled } })} onModeChange={(mode) => persistSettings({ mode })} />
                   {naming ? (
                     <button className="send-button is-naming" disabled title={t("composer.naming")}>
                       <LoaderIcon size={17} />
@@ -4006,10 +4000,11 @@ const EffortSlider = ({ efforts, value, onChange }) => {
   );
 };
 
-const ModelEffortPicker = ({ models, value, effort, narrator, open, onToggle, onModelChange, onEffortChange, onNarratorChange }) => {
+const ModelEffortPicker = ({ models, value, effort, narrator, mode, open, onToggle, onModelChange, onEffortChange, onNarratorChange, onModeChange }) => {
   const [advanced, setAdvanced] = useState(false);
   const [detail, setDetail] = useState("");
   const selected = models.find((model) => model.id === value) || models[0];
+  const activeMode = PERMISSION_MODES.find((item) => item.id === mode) || PERMISSION_MODES[1];
   const providers = [...new Set(models.map((model) => model.provider || model.providerKey || "Models"))];
   const hasEfforts = Boolean(selected?.efforts?.length);
   const activeEffort = effort || selected?.defaultEffort;
@@ -4058,6 +4053,11 @@ const ModelEffortPicker = ({ models, value, effort, narrator, open, onToggle, on
                 <span className="model-settings-value">{narrator ? t("model.on") : t("model.off")}</span>
                 <ChevronRight size={14} />
               </button>
+              <button className={detail === "permission" ? "model-settings-row is-active" : "model-settings-row"} onClick={() => setDetail((current) => current === "permission" ? "" : "permission")}>
+                <span>{t("perm.title")}</span>
+                <span className="model-settings-value">{t(`perm.${activeMode.id}`)}</span>
+                <ChevronRight size={14} />
+              </button>
               <div className="model-menu-divider" />
               <button className="model-advanced-toggle is-open" onClick={toggleAdvanced}>
                 <span>{t("model.advanced")}</span>
@@ -4102,6 +4102,24 @@ const ModelEffortPicker = ({ models, value, effort, narrator, open, onToggle, on
                   {enabled === narrator && <Check size={14} />}
                 </button>
               ))}
+            </div>
+          )}
+          {advanced && detail === "permission" && (
+            <div className="model-detail-panel permission-detail-panel">
+              <div className="model-detail-title">{t("perm.title")}</div>
+              {PERMISSION_MODES.map((item) => {
+                const Icon = item.Icon;
+                return (
+                  <button key={item.id} className={item.id === activeMode.id ? "permission-option is-active" : "permission-option"} onClick={() => onModeChange(item.id)}>
+                    <Icon size={17} className="permission-option-icon" />
+                    <span className="permission-option-text">
+                      <span className="permission-option-label">{t(`perm.${item.id}`)}</span>
+                      <span className="permission-option-desc">{t(`perm.${item.id}Desc`)}</span>
+                    </span>
+                    {item.id === activeMode.id && <Check size={15} className="permission-option-check" />}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -4267,6 +4285,12 @@ const ShieldAlertIcon = ({ size = 24, ...rest }) => (
     <path d="M12 16h.01" />
   </svg>
 );
+
+const PERMISSION_MODES = [
+  { id: "ask", Icon: Hand },
+  { id: "auto", Icon: ShieldCheck },
+  { id: "full", Icon: ShieldAlertIcon },
+];
 
 const GlobeCheckIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
@@ -5198,48 +5222,6 @@ const TodoPanel = ({ todos, goalMode, goal, goalDone, open }) => (
     )}
   </div>
 );
-
-const PERMISSION_MODES = [
-  { id: "ask", Icon: Hand },
-  { id: "auto", Icon: ShieldCheck },
-  { id: "full", Icon: ShieldAlertIcon },
-];
-
-const PermissionPicker = ({ value, open, onToggle, onChange }) => {
-  const active = PERMISSION_MODES.find((mode) => mode.id === value) || PERMISSION_MODES[0];
-  const ActiveIcon = active.Icon;
-  return (
-    <div className="permission-picker">
-      <button className="permission-pill" onClick={onToggle}>
-        <ActiveIcon size={14} />
-        <span>{t(`perm.${active.id}`)}</span>
-        <ChevronDown size={13} />
-      </button>
-      {open && (
-        <div className="permission-menu">
-          <div className="permission-menu-title">{t("perm.title")}</div>
-          {PERMISSION_MODES.map((mode) => {
-            const Icon = mode.Icon;
-            const className = ["permission-option"];
-            if (mode.id === value) {
-              className.push("is-active");
-            }
-            return (
-              <button key={mode.id} className={className.join(" ")} onClick={() => onChange(mode.id)}>
-                <Icon size={17} className="permission-option-icon" />
-                <span className="permission-option-text">
-                  <span className="permission-option-label">{t(`perm.${mode.id}`)}</span>
-                  <span className="permission-option-desc">{t(`perm.${mode.id}Desc`)}</span>
-                </span>
-                {mode.id === value && <Check size={15} className="permission-option-check" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
 
 const PlanCard = ({ plan, onAccept, accepted }) => {
   const [decided, setDecided] = useState(null);
