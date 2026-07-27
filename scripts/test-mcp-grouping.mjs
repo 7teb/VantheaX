@@ -91,4 +91,30 @@ check(source.includes('kind === "browser" ? Globe'), "browser groups use the glo
 check(source.includes("return SummaryIcon"), "file listings use the summary icon");
 check(source.includes("return SquareChartGanttIcon"), "single file reads use the gantt icon");
 
+const outlinedFiles = ["src/main.jsx", "electron/main.js", "package.json"].map((file, index) => ({
+  type: "tool",
+  tool: {
+    id: `outline-${index + 1}`,
+    name: "get_file_outline",
+    result: { path: file, outline: [] },
+  },
+}));
+const initialReadGroup = groupWorkSegments([
+  {
+    type: "tool",
+    tool: {
+      id: "list-1",
+      name: "list_files",
+      result: { files: [], directories: [], summary: "" },
+    },
+  },
+  ...outlinedFiles,
+]);
+
+check(initialReadGroup.length === 2, "file listing stays separate from the following read bundle");
+check(initialReadGroup[1].kind === "bundle", "file outlines use the read bundle");
+check(initialReadGroup[1].tools.length === 3, "three file outlines form one read group");
+check(clusterKind(outlinedFiles[0].tool) === "reads", "file outlines are classified as reads");
+check(source.includes(": SummaryIcon;"), "read bundles use the summary icon");
+
 console.log(`${passed} tool grouping checks passed`);
