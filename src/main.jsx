@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { AppWindow, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -3667,7 +3667,7 @@ const App = () => {
 
         <main className={messages.length ? "chat-panel has-messages" : "chat-panel is-empty"}>
           <button className={browserOpen ? "browser-toggle is-on" : "browser-toggle"} onClick={toggleBrowser} title={t("browser.open")}>
-            <AppWindow size={14} />
+            <Globe size={14} />
           </button>
           <button className={terminalOpen ? "terminal-toggle is-on" : "terminal-toggle"} onClick={toggleTerminal} title={t("terminal.open")}>
             <Terminal size={14} />
