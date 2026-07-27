@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -3617,6 +3617,7 @@ const App = () => {
           <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={rightPanel === "tasks"} />
           {messages.length > 0 && (
             <header className="chat-header">
+              {activeChat && <Folders className="chat-title-folder" size={18} aria-hidden="true" />}
               {renamingChatId && renamingChatId === activeChat?.id ? (
                 <input
                   className="chat-rename-input"
@@ -3943,7 +3944,7 @@ const TurnNavigator = ({ turns, scrollerRef }) => {
     scrollRafRef.current = requestAnimationFrame(frame);
   };
 
-  const railHeight = Math.min(420, Math.max(72, turns.length * 9));
+  const railHeight = Math.min(420, turns.length * 9);
   const previewIndex = preview ? turns.findIndex((turn) => turn.id === preview.turn.id) : 0;
   const previewRatio = turns.length > 1 ? previewIndex / (turns.length - 1) : .5;
   return (
