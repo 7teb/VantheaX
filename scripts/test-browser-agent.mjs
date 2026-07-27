@@ -5,6 +5,7 @@ import {
   bitmapDifference,
   collectFrameTree,
   formatAxEntry,
+  normalizeBrowserRef,
   normalizeBrowserTarget,
   normalizedVisionBox,
   publicBrowserArgs,
@@ -19,6 +20,11 @@ assert.equal(normalizeBrowserTarget("browser agent test"), "https://duckduckgo.c
 assert.equal(normalizeBrowserTarget("file:///C:/Windows/win.ini"), null);
 assert.equal(normalizeBrowserTarget("javascript:alert(1)"), null);
 assert.equal(normalizeBrowserTarget("about:blank"), "about:blank");
+assert.equal(normalizeBrowserRef("b37"), "b37");
+assert.equal(normalizeBrowserRef("ref_37"), "b37");
+assert.equal(normalizeBrowserRef("REF-37"), "b37");
+assert.equal(normalizeBrowserRef("[b37]"), "b37");
+assert.equal(normalizeBrowserRef("search-box"), "search-box");
 
 const passwordNode = {
   backendDOMNodeId: 44,

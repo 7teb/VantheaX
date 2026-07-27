@@ -122,10 +122,11 @@ const run = async () => {
   const emailRef = refFor(snapshot.content, "Email", "textbox");
   const typeResult = await service.runTool("browser_type", {
     snapshot_id: snapshot.snapshot_id,
-    ref: emailRef,
+    ref: `ref_${emailRef.slice(1)}`,
     text: "agent@example.com",
     clear: true,
   }, {});
+  assert.equal(typeResult.ref, emailRef);
   assert.equal(typeResult.text, "[REDACTED]");
   assert.equal(typeResult.text_length, 17);
   assert.equal(await guest.executeJavaScript(`document.getElementById("email").value`), "agent@example.com");
@@ -133,6 +134,12 @@ const run = async () => {
 
   const frameSnapshot = await service.runTool("browser_snapshot", {}, {});
   const frameRef = refFor(frameSnapshot.content, "Frame action", "button");
+  const unknown = await service.runTool("browser_click", {
+    snapshot_id: frameSnapshot.snapshot_id,
+    ref: "ref_9999",
+  }, {}).catch((error) => ({ error: error.message }));
+  assert.match(unknown.error, /Unknown browser reference/);
+  assert.doesNotMatch(unknown.error, /stale/i);
   await service.runTool("browser_click", {
     snapshot_id: frameSnapshot.snapshot_id,
     ref: frameRef,

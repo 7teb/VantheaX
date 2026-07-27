@@ -113,6 +113,18 @@ export const normalizeBrowserTarget = (value) => {
   }
 };
 
+export const normalizeBrowserRef = (value) => {
+  const raw = String(value || "").trim();
+  const bracketed = raw.match(/^\[([^\]]+)\]$/);
+  const candidate = bracketed ? bracketed[1] : raw;
+  const match = candidate.match(/^b(\d+)$/i) || candidate.match(/^ref[_-]?(\d+)$/i);
+  if (!match) {
+    return candidate;
+  }
+  const index = Number(match[1]);
+  return Number.isSafeInteger(index) && index > 0 ? `b${index}` : candidate;
+};
+
 const axValue = (value) => {
   if (value && typeof value === "object" && "value" in value) {
     return value.value;

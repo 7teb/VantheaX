@@ -8,6 +8,7 @@ import {
   collectFrameTree,
   formatAxEntry,
   normalizeBrowserTarget,
+  normalizeBrowserRef,
   normalizedVisionBox,
   readAxNode,
   shouldIncludeAxNode,
@@ -553,25 +554,31 @@ export const createBrowserAgentService = ({ getMainWindow, analyzeVision }) => {
   };
 
   const validateSnapshot = (snapshotId, refName, consume = false) => {
+    const requestedRefName = String(refName || "").trim();
+    const canonicalRefName = normalizeBrowserRef(requestedRefName);
     const parts = String(snapshotId || "").split(":");
     const tabId = parts.slice(0, -2).join(":");
     const tab = tabs.get(tabId);
     if (!tab) {
-      throw new Error(`Reference ${refName || ""} is stale. Call browser_snapshot again.`);
+      throw new Error(`Reference ${requestedRefName} is stale. Call browser_snapshot again.`);
     }
     cleanupStores(tab);
     const snapshot = tab.snapshots.get(String(snapshotId || ""));
-    const ref = snapshot?.refs.get(String(refName || ""));
-    if (!snapshot || !ref || snapshot.consumed || Date.now() - snapshot.createdAt > snapshotLifetime) {
-      throw new Error(`Reference ${refName || ""} is stale. Call browser_snapshot again.`);
+    if (!snapshot || snapshot.consumed || Date.now() - snapshot.createdAt > snapshotLifetime) {
+      throw new Error(`Reference ${requestedRefName} is stale. Call browser_snapshot again.`);
     }
     if (!tab.active || activeTabId !== tab.tabId || snapshot.documentEpoch !== tab.documentEpoch) {
-      throw new Error(`Reference ${refName || ""} is stale. Call browser_snapshot again.`);
+      throw new Error(`Reference ${requestedRefName} is stale. Call browser_snapshot again.`);
+    }
+    const ref = snapshot.refs.get(canonicalRefName);
+    if (!ref) {
+      const available = [...snapshot.refs.keys()].slice(0, 8).join(", ");
+      throw new Error(`Unknown browser reference "${requestedRefName}". Use an exact ref from this snapshot${available ? `, for example ${available}` : ""}.`);
     }
     if (consume) {
       snapshot.consumed = true;
     }
-    return { tab, snapshot, ref };
+    return { tab, snapshot, ref, refName: canonicalRefName };
   };
 
   const snapshotOnce = async (tab, args, signal) => {
@@ -1248,7 +1255,7 @@ export const createBrowserAgentService = ({ getMainWindow, analyzeVision }) => {
         }
         await clickPoint(tab, live.inputX, live.inputY, Boolean(args.double), signal, live.sessionId);
         invalidateTab(tab, false);
-        return { browserClick: true, tab_id: tab.tabId, ref: String(args.ref), double: Boolean(args.double) };
+        return { browserClick: true, tab_id: tab.tabId, ref: validated.refName, double: Boolean(args.double) };
       }
       if (name === "browser_type") {
         const validated = validateSnapshot(args.snapshot_id, args.ref, true);
@@ -1271,7 +1278,7 @@ export const createBrowserAgentService = ({ getMainWindow, analyzeVision }) => {
         return {
           browserType: true,
           tab_id: tab.tabId,
-          ref: String(args.ref),
+          ref: validated.refName,
           text: "[REDACTED]",
           text_length: text.length,
           protected: Boolean(live.protected),
