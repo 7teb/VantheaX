@@ -11,6 +11,7 @@ import { createBackgroundTaskManager } from "./background-tasks.js";
 import { createAgentSessionManager } from "./agent-sessions.js";
 import { createChatStore } from "./chat-store.js";
 import { readTextWindow } from "./text-window.js";
+import { configureBrowserHost, configureBrowserSession, registerBrowserGuestSecurity } from "./browser-guest.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +46,7 @@ const agentRuntimeLimit = 2 * 60 * 60 * 1000;
 const agentFirstTokenTimeout = 75000;
 const agentStreamIdleTimeout = 90000;
 let mainWindow = null;
+registerBrowserGuestSecurity(app, () => mainWindow);
 let backgroundTaskManager = null;
 let agentSessionManager = null;
 let chatStore = null;
@@ -4889,8 +4891,10 @@ const createWindow = async () => {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
+      webviewTag: true,
     },
   });
+  configureBrowserHost(mainWindow);
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url);
     return { action: "deny" };
@@ -5320,6 +5324,7 @@ app.on("before-quit", () => {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  configureBrowserSession();
   await ensureWorkspace().catch(() => {});
   chatStore = createChatStore({
     directory: getUserFile("chat-store"),

@@ -1,12 +1,14 @@
-# In-App-Browser, Implementierungsplan (v4)
+# In-App-Browser, Implementierungsplan (v5)
 
-> **STATUS: PLAN, nichts davon ist gebaut.** Geschrieben gegen den echten Baum (`src/main.jsx` 7121 Zeilen, `src/styles.css` 6523 Zeilen, `electron/main.js` 5375 Zeilen, Stand 2026-07-27). Alle Zeilennummern und Klassennamen sind im aktuellen Baum nachgelesen. Sie verschieben sich beim Einfügen, also als Orientierung nutzen, nicht blind.
+> **STATUS: IMPLEMENTIERT UND AN DER GEPACKTEN EXE VERIFIZIERT.** Ursprünglich gegen den Baum vom 2026-07-27 geschrieben. Historische Zeilennummern bleiben als Entscheidungsnachweis erhalten.
 >
 > **v2 nach Review 1:** `allowpopups` ist doch nötig, sonst feuert der Popup-Handler nie (§8); `src` wird genau einmal gebunden, sonst lädt jeder Klick doppelt (§5.3); `pendingUrl` wird nicht mehr von jeder Navigation gelöscht (§5.2); Permission-Deny bekommt eine Allowlist (§8); `did-navigate-in-page` frischt die Pfeile mit auf (§9); Schema-Wand am Guest (§8); deutsche Strings mit Umlauten (§11).
 >
 > **v3 nach Review 2:** `closeDockExcept` ersetzt NICHT die Rümpfe der bestehenden Toggles und muss den eigenen Close-Timer des behaltenen Panels mit löschen, sonst wipet ein stale Timer die frisch geöffneten Tabs (§5.4); der `openFile`-Hook ist raus, er hätte bei jedem Datei-Klick laufende Terminal-Sessions getötet (§5.4); die URL-Regel-Reihenfolge machte `localhost:5173` zu `null` (§7); Popup-Tabs und schnelles Enter verloren ihre Navigation im Attach-Fenster (§5.7/§6.3); Partition, Deny-Handler und Download-Block wandern von Phase 3 nach Phase 2, weil der User die Phase-2-Exe testet (§13); `guestRefs` wird im Unmount geräumt (§5.5); die Fokus-Bedingung gilt pro Tab (§5.2); das `<webview>`-Element braucht eine eigene Größen-Regel (§4).
 >
 > **v4 nach Review 3:** `will-attach-webview` validiert jedes Guest vor dem Attach und erzwingt sichere WebPreferences (§8); Permission-Request und Permission-Check verwenden dieselbe Allowlist (§8); Hintergrund-Navigationen räumen veraltete URL-Entwürfe auf (§5.2/§9); Loopback-Adressen verwenden ohne explizites Schema `http://` (§7); sämtliche Guest-Härtung liegt vor dem ersten Laden fremder Inhalte in Phase 2 (§13); die gepackte App wird vom Agenten selbst live geprüft (§14); neue Code-Kommentare sind ausnahmslos verboten (§16).
+>
+> **v5 nach Review 4:** `will-redirect` und ein Main-Frame-Filter der Browser-Session schließen die bisher fehlenden Redirect- und direkten `loadURL`-Grenzen; v1 verweigert über Request- und Check-Handler ausnahmslos alle Web-Permissions; Guest-Listener lesen den aktiven Tab aus einer synchron gehaltenen Ref statt aus einer stale Closure; Tabs und aktive ID liegen in einem Reducer; Browser-UI, URL-Normalisierung und Main-Prozess-Härtung wandern in getrennte Module; URL-Tests importieren das echte Modul; ein lokaler HTTP-Fixture-Server deckt Navigation, Redirects, Popups, Downloads und Permissions deterministisch ab; privates LAN wird ohne explizites `http://` weiterhin nicht herabgestuft; Popup-Requests mit POST-Body werden in v1 blockiert statt still zu GET umgeschrieben.
 
 ---
 
@@ -48,22 +50,19 @@ Das korrigiert die mündliche Empfehlung aus dem Gespräch davor (dort hatte ich
 
 **`webviewTag: true` vergrößert die Sicherheitsfläche.** Die Flag erlaubt es Renderer-Inhalten, `<webview>`-Elemente zu erzeugen. Der Renderer dieser App lädt ausschließlich das eigene Vite-Bundle von `file://`, aber ein späterer Renderer-Bug oder eine XSS dürfte deshalb trotzdem kein Guest mit fremdem `preload`, Node-Integration, falscher Partition oder unsicherer Start-URL erzeugen. Vor jedem Attach validiert deshalb `will-attach-webview` die Parameter, entfernt `preload` und erzwingt `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `nodeIntegrationInSubFrames: false`, `contextIsolation: true`, `sandbox: true`, `webSecurity: true`, `allowRunningInsecureContent: false`, `experimentalFeatures: false` und `webviewTag: false`. Das Guest bleibt damit sandboxed, obwohl das bestehende Hauptfenster in `electron/main.js:4890` derzeit `sandbox: false` verwendet.
 
-### 3.1 Phase 0 ist ein Spike, kein Bau
+### 3.1 Phase 0, gemessenes Ergebnis
 
 Bevor irgendeine UI entsteht, werden an der gepackten Exe sieben Fragen beantwortet. Der Grund steht in DECISIONS.md 2026-07-21: eine ungeprüfte Plattform-Annahme im heißen Pfad ist ein latenter Ausfall, und der `openrouter:datetime`-Vorfall hat genau diese Lektion gekostet.
 
-Zu klären, weil von hier aus **nicht** verifizierbar:
+Die gepackte Electron-39-App wurde gegen `scripts/browser-fixture.mjs` geprüft:
 
-1. Rendert ein `<webview src="https://example.com">` mit `webviewTag: true` überhaupt?
-2. Heißt die Navigations-API am Element `canGoBack()` / `goBack()` oder `navigationHistory.canGoBack()` / `navigationHistory.goBack()`? In Electron 30+ wurde `webContents.canGoBack()` zugunsten von `webContents.navigationHistory` deprecated; ob das für den `<webview>`-Wrapper mitgezogen wurde, ist ungeprüft. **Der Plan legt keinen der beiden Namen fest**, §6.3 definiert einen Adapter mit Feature-Detection.
-3. Feuern `did-attach`, `did-navigate`, `did-navigate-in-page`, `page-title-updated`, `did-start-loading`, `did-stop-loading`, `did-fail-load`, `render-process-gone` wie dokumentiert, und existiert `will-frame-navigate` am Guest-`webContents` in diesem Build?
-4. **Feuert `setWindowOpenHandler` am Guest, wenn `allowpopups` gesetzt ist, und was passiert ohne die Flag?** Test: eine Seite mit `target="_blank"`-Link und eine mit `window.open(...)`, je einmal mit und ohne `allowpopups`. Daran hängt §8.
-5. **Wann ist das Guest attached, und wie lang ist das Fenster davor?** Test: sofort nach dem Mount `loadURL` rufen, ohne auf `did-attach` zu warten. Davon hängt §5.7 ab.
-6. **Sind die Permission-Namen `fullscreen` und `clipboard-sanitized-write` in diesem Build gültig**, und wird HTML5-Vollbild in einem Guest innerhalb eines Panels sinnvoll dargestellt?
-7. **Erzwingt `will-attach-webview` am tatsächlichen Guest `sandbox: true` und entfernt es ein künstlich gesetztes `preload` zuverlässig?** Der Spike versucht einmal absichtlich falsche Attribute; das Attach muss verhindert oder die unsicheren Optionen müssen vor der Erstellung entfernt werden.
-
-**Ergebnis Fall A (Frage 1 funktioniert):** weiter mit Phase 1, die gemessenen Antworten auf 2 bis 7 werden in §5.7, §6.3 und §8 eingetragen.
-**Ergebnis Fall B (Frage 1 scheitert):** Plan stoppt, `WebContentsView` wird als Ersatz-Substrat geplant, mit Bounds-Sync und Overlay-Verstecken als Extra-Arbeit. Nicht blind umschwenken, das ist eine eigene Planrunde.
+1. `<webview>` rendert sichtbar und nimmt die komplette Panel-Fläche ein.
+2. Die Element-APIs heißen in diesem Build direkt `canGoBack()`, `goBack()`, `canGoForward()`, `goForward()`, `loadURL()` und `reload()`.
+3. Attach, Navigation, In-Page-Navigation, Titel, Ladezustand, Fehler und Redirect-Grenze feuern wie benötigt.
+4. Mit `allowpopups` erreichen GET-Links und `window.open` den Deny-Handler und werden interne Tabs. Ohne die Flag entsteht kein Tab. POST-Popups bleiben blockiert.
+5. Das kurze Vor-Attach-Fenster wird durch `queuedLoads` abgefangen. Direktes Enter nach einem neuen Tab lädt zuverlässig.
+6. Geolocation wurde im Guest abgelehnt. Beide Session-Handler verweigern generell alle Permissions.
+7. Falsche Partition und `file:`-Start-URL attachen nicht. Ein künstliches `preload` wird entfernt. Der Guest-Prozess läuft mit `--enable-sandbox`, `process` und `require` sind `undefined`.
 
 ## 4. Layout-Integration (verifizierte Anker)
 
@@ -117,13 +116,10 @@ Spiegelt den Terminal-Block bei `:2050-2062`.
 const [browserOpen, setBrowserOpen] = useState(false);
 const [browserFull, setBrowserFull] = useState(false);
 const [browserClosing, setBrowserClosing] = useState(false);
-const [browserTabs, setBrowserTabs] = useState([]);
-const [browserActive, setBrowserActive] = useState(0);
-const browserSeq = useRef(0);
 const browserCloseTimer = useRef(null);
-const guestRefs = useRef(new Map());
-const urlFocusRef = useRef(false);
 ```
+
+`BrowserPanel` kapselt den tabbezogenen Zustand in `useReducer` als ein zusammenhängendes `{ tabs, activeId }`. Damit kann kein Render einen gelöschten aktiven Tab mit einer bereits aktualisierten Tab-Liste kombinieren. `activeIdRef` wird synchron per Effekt aktualisiert und von allen langlebigen Guest-Listenern gelesen. `guestRefs`, `urlFocusRef` und die Tab-Sequenz bleiben ebenfalls innerhalb des Browser-Moduls. Der App-Root besitzt nur Öffnen, Vollbild und Closing-Timer.
 
 ### 5.1 Tab-Objekt
 
@@ -144,12 +140,12 @@ Genau vier Ereignisse setzen `pendingUrl` auf `null`:
 3. Ein `did-navigate`, **wenn der meldende Tab nicht aktiv ist ODER `urlFocusRef.current === false`**.
 4. Ein `did-navigate-in-page` des Main Frames unter derselben Bedingung.
 
-Die einzige Situation, in der ein Entwurf erhalten bleibt, ist `meldenderTab === browserActive && urlFocusRef.current === true`. Dann tippt der User gerade sichtbar in genau diesem Feld. Jede Navigation eines Hintergrund-Tabs räumt dessen Entwurf auf, weil der User dort unmöglich gerade tippen kann. Jede Navigation des aktiven Tabs räumt ihn ebenfalls auf, sobald das Feld nicht fokussiert ist.
+Die einzige Situation, in der ein Entwurf erhalten bleibt, ist `meldenderTab === activeIdRef.current && urlFocusRef.current === true`. Dann tippt der User gerade sichtbar in genau diesem Feld. Jede Navigation eines Hintergrund-Tabs räumt dessen Entwurf auf, weil der User dort unmöglich gerade tippen kann. Jede Navigation des aktiven Tabs räumt ihn ebenfalls auf, sobald das Feld nicht fokussiert ist.
 
 Die konkrete Löschbedingung lautet deshalb:
 
 ```
-tabId !== browserActive || !urlFocusRef.current
+tabId !== activeIdRef.current || !urlFocusRef.current
 ```
 
 Sie gilt identisch für `did-navigate` und `did-navigate-in-page`. Damit kann weder eine Redirect-Kette im Hintergrund noch eine `pushState`-Navigation einen veralteten Entwurf hinterlassen.
@@ -362,10 +358,10 @@ Das Guest lädt fremdes Web in den Prozessbaum der App.
 
 - **`will-attach-webview` ist die erste Sicherheitsgrenze.** Der Handler hängt an `mainWindow.webContents`, bevor das Renderer-Bundle geladen wird. Er akzeptiert nur `partition === "persist:vx-browser"` und eine initiale URL mit `http:`, `https:` oder exakt `about:blank`. Er entfernt `webPreferences.preload` und erzwingt `nodeIntegration: false`, `nodeIntegrationInWorker: false`, `nodeIntegrationInSubFrames: false`, `contextIsolation: true`, `sandbox: true`, `webSecurity: true`, `allowRunningInsecureContent: false`, `experimentalFeatures: false` und `webviewTag: false`. Ungültige Partitionen oder Start-URLs brechen das Attach per `preventDefault` ab. Defaults allein reichen hier nicht, weil `webviewTag: true` jede spätere Renderer-Lücke zu einer Guest-Erzeugungsfläche machen würde.
 - **Eigene Session:** `partition="persist:vx-browser"`. Eigener Cookie-Jar, getrennt von allem anderen, aber persistent, damit Logins einen Neustart überleben. **Das Attribut sitzt ab Phase 2 dran, nicht erst ab Phase 3**, siehe §13.
-- **`allowpopups` ist eine kontrollierte Ausnahme und wird nie ohne fertigen Deny-Handler aktiviert.** Der globale `web-contents-created`-Handler wird vor `createWindow` registriert. Für jedes Guest setzt er sofort `setWindowOpenHandler`, gibt ausnahmslos `{ action: "deny" }` zurück und leitet nur eine mit `isBrowserGuestUrlAllowed` validierte HTTP-/HTTPS-URL als neuen internen Tab weiter. Erst danach darf das Renderer-Element `allowpopups` tragen. Ohne die Flag lehnt Chromium `window.open` und `target="_blank"` ab, bevor der Handler gefragt wird; mit der Flag bleibt die eigentliche Fenstererzeugung trotzdem immer blockiert. **Phase 0 Frage 4 misst diese Annahme.** Bestätigt der Spike sie nicht, fällt `allowpopups` vollständig weg.
-- **Schema-Wand am Guest:** `will-navigate` und, falls im Build vorhanden (§3.1 Frage 3), `will-frame-navigate` prüfen Main-Frame-Ziele mit dem URL-Parser. Erlaubt sind nur `http:`, `https:` und exakt `about:blank`; alles andere wird per `preventDefault` verworfen. Subframe-Navigationen werden nicht pauschal auf diese drei Werte reduziert, weil normale Seiten intern `blob:`, `data:` und `about:srcdoc` verwenden können; dort bleibt Chromiums aktiviertes `webSecurity` zuständig. Das ist die Main-Prozess-Grenze für seiten-initiierte Navigation. Eigene `loadURL`-Aufrufe feuern diese Events nicht und werden vorher im Renderer normalisiert.
+- **`allowpopups` ist eine kontrollierte Ausnahme und wird nie ohne fertigen Deny-Handler aktiviert.** Der globale `web-contents-created`-Handler wird vor `createWindow` registriert. Für jedes Guest setzt er sofort `setWindowOpenHandler`, gibt ausnahmslos `{ action: "deny" }` zurück und leitet nur eine mit `isBrowserGuestUrlAllowed` validierte HTTP-/HTTPS-URL ohne POST-Body als neuen internen Tab weiter. Popup-Requests mit POST-Body bleiben in v1 blockiert, weil eine Weitergabe als URL ihre Semantik und Nutzdaten verlieren und unbemerkt zu GET werden würde. Erst danach darf das Renderer-Element `allowpopups` tragen.
+- **Schema-Wand am Guest:** `will-navigate`, `will-frame-navigate` und das separat abbrechbare `will-redirect` prüfen Main-Frame-Ziele mit dem URL-Parser. Zusätzlich blockiert `webRequest.onBeforeRequest` auf der eigenen Browser-Session jeden Main-Frame-Request außerhalb von HTTP und HTTPS. Damit kann auch ein direkter programmgesteuerter `loadURL`-Aufruf die Grenze nicht umgehen. `about:blank` bleibt als interner Startzustand erlaubt. Subframe-Navigationen werden nicht pauschal reduziert, weil normale Seiten intern `blob:`, `data:` und `about:srcdoc` verwenden können; dort bleibt Chromiums aktiviertes `webSecurity` zuständig.
 - **Downloads sind in v1 aus.** `session.on("will-download")` auf der Partition ruft `item.cancel()`.
-- **Permissions: Request und Check verwenden dieselbe kleine Allowlist.** `session.setPermissionRequestHandler` und `session.setPermissionCheckHandler` auf der Partition erlauben ausschließlich `fullscreen` und `clipboard-sanitized-write` für HTTP-/HTTPS-Ursprünge; alles andere liefert beziehungsweise erhält `false`. Electron verlangt beide Handler für vollständige Permission-Kontrolle. Kamera, Mikrofon, Standort, Notifications, Zwischenablage-Lesen, Pointer-Lock, MIDI, Gerätezugriff und alles Übrige bleiben hart aus. Die Handler hängen **an der Browser-Partition**, nicht an der Default-Session, und lassen das Verhalten der App selbst unberührt. Die genauen Permission-Namen bestätigt Phase 0 Frage 6.
+- **Permissions sind in v1 vollständig aus.** `session.setPermissionRequestHandler` ruft immer `callback(false)`, `session.setPermissionCheckHandler` liefert immer `false`. Damit hängen Sicherheit und Tests nicht an versionsabhängigen Permission-Namen. Das Panel-Vollbild ist reine App-UI und benötigt keine Webseiten-Permission. Die Handler hängen **an der Browser-Partition**, nicht an der Default-Session, und lassen das Verhalten der App selbst unberührt.
 - **Das Hauptfenster bleibt unberührt.** `setWindowOpenHandler` und `will-navigate` an `mainWindow.webContents` (`:4894`, `:4898`) gelten weiter. Ein Guest ist ein eigenes WebContents, seine Navigation läuft nicht durch diese Handler.
 - **Guest-Absturz beendet die App nicht.** `render-process-gone` setzt den Tab auf einen Fehlerzustand mit Reload-Hinweis.
 
@@ -428,9 +424,10 @@ browser.loadFailed     "Could not load this page"  / "Seite konnte nicht geladen
 **`electron/main.js`**
 
 1. `webPreferences` (`:4886-4891`): `webviewTag: true` ergänzen. Einzige Änderung an der Fensterkonfiguration.
-2. Direkt nach der Erzeugung des Hauptfensters und vor `loadURL`/`loadFile`: `will-attach-webview` registrieren, Parameter validieren, `preload` entfernen und die sicheren Guest-WebPreferences aus §8 erzwingen.
-3. Nach `app.whenReady`: Partition `persist:vx-browser` holen, `setPermissionRequestHandler`, `setPermissionCheckHandler` und `will-download` gemäß §8 setzen.
-4. `app.on("web-contents-created")` vor `createWindow` registrieren. Für `contents.getType() === "webview"` sofort `setWindowOpenHandler` (immer deny, sichere URL an den Renderer), `will-navigate` und, falls vorhanden, `will-frame-navigate` setzen.
+2. Das neue Modul `electron/browser-guest.js` kapselt URL-Validator, `will-attach-webview`, Partitionshärtung und die globalen Guest-Listener.
+3. Direkt nach der Erzeugung des Hauptfensters und vor `loadURL`/`loadFile`: `will-attach-webview` registrieren, Parameter validieren, `preload` entfernen und die sicheren Guest-WebPreferences aus §8 erzwingen.
+4. Nach `app.whenReady`: Partition `persist:vx-browser` holen, beide vollständigen Permission-Deny-Handler und `will-download` gemäß §8 setzen.
+5. `app.on("web-contents-created")` vor `createWindow` registrieren. Für `contents.getType() === "webview"` sofort `setWindowOpenHandler` (immer deny, sichere GET-URL an den Renderer), `will-navigate`, `will-frame-navigate` und `will-redirect` setzen.
 5. `isBrowserGuestUrlAllowed` ist der eine Main-Prozess-Validator für Attach, Navigation und Popup-URLs. Er verwendet `new URL`, akzeptiert nur HTTP, HTTPS und an den ausdrücklich genannten Stellen exakt `about:blank` und wirft bei ungültiger Eingabe nicht.
 6. **Keine Änderung** an `toolSpecs`, `toolsForContext`, `executeTool`, `buildSystemPrompt`, `runAgentStream`, dem katastrophalen Floor oder irgendeinem Agent-Permission-Pfad. v1 gibt dem Modell nichts.
 
@@ -440,12 +437,12 @@ browser.loadFailed     "Could not load this page"  / "Seite konnte nicht geladen
 
 **`src/main.jsx`**
 
-8. Import in Zeile 3 unverändert, alle nötigen Lucide-Icons sind da.
-9. State-Block nach `:2062`.
+8. `src/browser/BrowserPanel.jsx` kapselt Panel, Reducer, Tabs, Toolbar, Guest-Adapter und Guest-Events. `src/browser/browser-url.js` enthält die importierbaren URL-Funktionen.
+9. Der State-Block im App-Root enthält nur Panel-Öffnung, Vollbild, Closing und Timer.
 10. `closeDockExcept` plus die Browser-Handler nach `:2945`; `toggleTerminal` (`:2911`) und der Background-Zweig von `openRightPanel` (`:2849`) rufen den Helfer, behalten aber ihre Öffnen-Logik (§5.4).
 11. Die vier restlichen Anpassungsstellen aus §5.4.
-12. `normalizeBrowserUrl` und `displayUrl` auf Modulebene neben `folderName` / `normPath` (`:1171-1178`).
-13. Neue Komponenten neben `TerminalPanel` (`:4748`).
+12. `normalizeBrowserUrl` und `displayBrowserUrl` werden aus `src/browser/browser-url.js` importiert.
+13. `BrowserPanel` wird aus dem Browser-Modul importiert und neben `TerminalPanel` gerendert.
 14. Render-Block neben dem Terminal-Panel-Block (`:3738-3751`).
 15. Toggle-Button neben `.terminal-toggle` (`:3609`).
 16. Popup-Listener-Effekt: Die Main-Prozess-Grenze liefert bereits nur HTTP-/HTTPS-URLs; der Renderer normalisiert erneut und ruft erst dann `addBrowserTab(url)`.
@@ -463,14 +460,14 @@ Jede Phase endet mit `node --check electron/main.js`, NUL-Byte-Scan, `npm.cmd ru
 
 - **Phase 0: Spike (§3.1).** Nur `webviewTag: true`, die vollständige `will-attach-webview`-Validierung und ein hartverdrahtetes `<webview>` in einer Ecke, dazu Popup-, Attach-, Sandbox- und Permission-Tests. Beantwortet die sieben Fragen. Der Spike wird danach vollständig entfernt.
 - **Phase 1: Panel und Layout.** Toggle, Grid-Klassen, Panel-Rahmen, Kopfzeile mit Tabs, `+`, Fullscreen, `X`, Resizer und `closeDockExcept`. Noch ohne Guest, die View-Fläche ist leer. Danach sind Rausfahren, Resizen und Panel-Exklusivität prüfbar, ohne dass eine einzige fremde Seite lädt.
-- **Phase 2: Guest, Toolbar und vollständige Guest-Härtung.** `BrowserView`, Adapter, Events, Toolbar, `normalizeBrowserUrl`, `displayUrl`, feste Partition, `will-attach-webview`, sandboxed Guest-WebPreferences, Permission-Request-Handler, Permission-Check-Handler, Download-Block, Mainframe-Schema-Wand, Popup-Deny, Popup-zu-Tab und Fehlerzustand landen gemeinsam. **Kein fremder Inhalt wird auch nur für einen Zwischenbuild ohne diese Grenzen geladen.**
+- **Phase 2: Guest, Toolbar und vollständige Guest-Härtung.** `BrowserView`, Reducer, Adapter, Events, Toolbar, URL-Modul, feste Partition, `will-attach-webview`, sandboxed Guest-WebPreferences, vollständiger Permission-Deny, Download-Block, Mainframe- und Redirect-Schema-Wand, Popup-Deny, GET-Popup-zu-Tab und Fehlerzustand landen gemeinsam. **Kein fremder Inhalt wird auch nur für einen Zwischenbuild ohne diese Grenzen geladen.**
 - **Phase 3: Oberfläche und Kompatibilitätsprüfung.** Vollständige i18n, finale Tab-Beschriftung, Fokusverhalten, Fullscreen-Verhalten, Redirects, `pushState`, Loopback-HTTP, Popup-Tabs, Guest-Absturz und alle Interaktionen aus §14 werden an der gepackten Exe geprüft und verbleibende UI-Fehler korrigiert.
 
 Reihenfolge ist nicht beliebig: Phase 1 isoliert das Layout ohne Guest. Phase 2 führt fremde Inhalte erst zusammen mit der vollständigen Sicherheitsgrenze ein. Phase 3 verändert keine Sicherheitsarchitektur mehr, sondern prüft und poliert das fertige Verhalten.
 
 ## 14. Verifikation
 
-**Isoliert und deterministisch** (`scripts/test-browser-url.mjs`, Technik wie `scripts/test-floor.mjs`: Funktion per `indexOf`-Anker aus `src/main.jsx` slicen und mit `new Function` auswerten). `normalizeBrowserUrl` und `displayUrl` sind bewusst closure-frei, damit das ohne Konstanten-Block funktioniert. Fälle:
+**Isoliert und deterministisch:** `scripts/test-browser-url.mjs` importiert die echten Exporte aus `src/browser/browser-url.js` und prüft sie ohne Quelltext-Slicing oder `new Function`. Fälle:
 
 - `example.com` → `https://example.com`
 - `https://a.de/x?y=1` unverändert, `http://a.de` unverändert
@@ -486,22 +483,19 @@ Reihenfolge ist nicht beliebig: Phase 1 isoliert das Layout ohne Guest. Phase 2 
 - Führende und nachlaufende Leerzeichen werden getrimmt, nicht in die Suche gegeben
 - `displayUrl("about:blank")` → `""`, `displayUrl("https://x.de")` → unverändert
 
+**Lokale Fixture:** `scripts/browser-fixture.mjs` startet ohne neue Dependency einen HTTP-Server mit normaler Navigation, `pushState`, sicherem Redirect, Redirect auf ein verbotenes Schema, `target="_blank"`, `window.open`, POST-Popup, Download und Permission-Anfrage. Private LAN-Adressen werden nur mit explizitem `http://` geladen; ausschließlich Loopback erhält die bequeme automatische HTTP-Regel.
+
 **Live an der gepackten App durch den Agenten zu prüfen:**
 
-Panel fährt raus statt zu poppen; Breite ist ziehbar und mit Terminal geteilt; Fullscreen blendet den Chat aus; Terminal-Öffnen schließt den Browser sofort ohne Doppel-Panel-Frame und umgekehrt; **Terminal per X schließen und innerhalb einer Viertelsekunde wieder öffnen lässt die Tabs stehen** (der stale-Timer-Fall aus §5.4); **ein Klick auf eine Datei im Sidebar-Baum lässt ein offenes Terminal unangetastet**; das PanelSwitch-Dropdown schließt sich, wenn man darin Background Tasks wählt; zweiter Tab beschriftet die Leiste auf "Tab 1" / "Tab 2"; Zurück und Vorwärts sind korrekt ausgegraut, **auch auf einer `pushState`-Seite**; Refresh lädt neu; Enter in der Adressleiste navigiert; **Enter direkt nach dem Öffnen eines neuen Tabs navigiert oder lässt zumindest den Text stehen**; ein `target="_blank"`-Link öffnet einen internen Tab, **der die Zielseite wirklich zeigt**; `localhost:<port>`, `127.0.0.1:<port>` und `[::1]:<port>` eines laufenden HTTP-Testservers laden; ein Download-Link erzeugt keine Datei; Fullscreen und Clipboard-Write funktionieren, während Kamera, Mikrofon, Geolocation und Clipboard-Read abgelehnt werden; ein manipuliertes Guest mit `preload`, falscher Partition oder unsicherer Start-URL wird vor dem Attach blockiert; das tatsächliche Guest läuft sandboxed; ein Klick ins Guest und danach Ctrl+B zeigt das Fokus-Verhalten aus §5.6.
+Panel fährt raus statt zu poppen; Breite ist ziehbar und mit Terminal geteilt; Fullscreen blendet den Chat aus; Terminal-Öffnen schließt den Browser sofort ohne Doppel-Panel-Frame und umgekehrt; **Terminal per X schließen und innerhalb einer Viertelsekunde wieder öffnen lässt die Tabs stehen** (der stale-Timer-Fall aus §5.4); **ein Klick auf eine Datei im Sidebar-Baum lässt ein offenes Terminal unangetastet**; das PanelSwitch-Dropdown schließt sich, wenn man darin Background Tasks wählt; zweiter Tab beschriftet die Leiste auf "Tab 1" / "Tab 2"; Zurück und Vorwärts sind korrekt ausgegraut, **auch auf einer `pushState`-Seite**; Refresh lädt neu; Enter in der Adressleiste navigiert; **Enter direkt nach dem Öffnen eines neuen Tabs navigiert oder lässt zumindest den Text stehen**; ein GET-`target="_blank"`-Link öffnet einen internen Tab, **der die Zielseite wirklich zeigt**; ein POST-Popup bleibt blockiert; sichere Redirects laden und Redirects auf verbotene Schemas werden abgebrochen; `localhost:<port>`, `127.0.0.1:<port>` und `[::1]:<port>` laden; ein Download-Link erzeugt keine Datei; alle Permission-Anfragen werden abgelehnt; ein manipuliertes Guest mit `preload`, falscher Partition oder unsicherer Start-URL wird vor dem Attach blockiert; das tatsächliche Guest läuft sandboxed; ein Klick ins Guest und danach Ctrl+B zeigt das Fokus-Verhalten aus §5.6.
 
 ## 15. Offene Punkte, ehrlich
 
-1. **`<webview>` in diesem Electron-Build ist ungeprüft** (§3.1 Frage 1). Die einzige Annahme, an der der ganze Plan hängt; Phase 0 existiert ausschließlich deswegen.
-2. **Der Name der Navigations-API ist ungeprüft** (§3.1 Frage 2), über den Adapter abgefangen, aber nicht bewiesen.
-3. **Das Popup-Verhalten mit und ohne `allowpopups` ist Quellcode-Argument, keine Messung** (§8). Phase 0 Frage 4 misst es. Sollte der Handler auch ohne die Flag feuern, fällt `allowpopups` wieder weg, der Rest bleibt gleich.
-4. **`will-frame-navigate` und die Permission-Namen `fullscreen` / `clipboard-sanitized-write` sind Doku-Wissen, nicht am Build gemessen** (§3.1 Fragen 3 und 6). Die Mainframe-Schema-Wand hängt nicht von `will-frame-navigate` ab, weil `will-navigate` sie vollständig abdeckt; fehlt das zusätzliche Event, entfällt nur die redundante Messung. Abweichende Permission-Namen werden aus der gemessenen Phase-0-Ausgabe übernommen.
-5. **Ob `will-attach-webview` in diesem Build `sandbox: true` am tatsächlichen Guest erzwingt und ein gesetztes `preload` zuverlässig entfernt, ist ungeprüft** (§3.1 Frage 7). Ein Fehlschlag stoppt den Plan wie ein fehlendes `<webview>`; fremde Inhalte werden dann nicht geladen.
-6. **Wie HTML5-Vollbild in einem Guest innerhalb eines Panels aussieht, ist ungeprüft** (§3.1 Frage 6).
-7. **Zoom.** `window:zoom` setzt den Zoom des Hauptfensters. Ob das Guest mitzoomt, ist ungeprüft und für v1 egal, weil kein eigener Zoom-Regler gebaut wird.
-8. **Speicherverbrauch.** Jeder Tab ist ein eigener Renderer-Prozess. Fünf Tabs sind fünf Chromium-Prozesse zusätzlich zur App. Kein Limit in v1, gehört aber genannt, bevor jemand zwanzig Tabs aufmacht.
-9. **DuckDuckGo als Such-Fallback** (§7 Regel 8) ist eine Entscheidung, die der User kippen kann.
-10. **Tabs sterben beim Schließen des Panels** (§10). Bewusst, aber die wahrscheinlichste Stelle, an der der User widerspricht.
+1. **Webseiten-HTML5-Vollbild bleibt absichtlich aus.** Das Panel-Vollbild ist App-UI und benötigt keine Webseiten-Permission.
+2. **Zoom.** `window:zoom` setzt den Zoom des Hauptfensters. Das Guest hat in v1 keinen eigenen Zoom-Regler.
+3. **Speicherverbrauch.** Jeder Tab ist ein eigener Renderer-Prozess. Ein Tab-Limit ist für v1 nicht vorgesehen.
+4. **DuckDuckGo als Such-Fallback** (§7 Regel 8) ist die festgelegte Standardsuche.
+5. **Tabs sterben beim Schließen des Panels** (§10). Das verhindert unsichtbar weiterlaufende Seiten und Audio.
 
 ## 16. Hausregeln, die für diese Umsetzung binden
 

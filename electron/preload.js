@@ -95,4 +95,9 @@ contextBridge.exposeInMainWorld("agentApi", {
     ipcRenderer.on("terminal:exit", listener);
     return () => ipcRenderer.removeListener("terminal:exit", listener);
   },
+  onBrowserPopup: (handler) => {
+    const listener = (_, url) => handler(url);
+    ipcRenderer.on("browser:popup", listener);
+    return () => ipcRenderer.removeListener("browser:popup", listener);
+  },
 });

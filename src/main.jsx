@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { AppWindow, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, KeyRound, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import MarkdownMessage from "./Markdown.jsx";
+import BrowserPanel from "./browser/BrowserPanel.jsx";
 import "./styles.css";
 
 let LANG = "en";
@@ -283,6 +284,19 @@ const STRINGS = {
     "terminal.exitFullscreen": "Exit fullscreen",
     "terminal.exited": "process exited with code {code}",
     "terminal.resize": "Drag to resize",
+    "browser.open": "Browser",
+    "browser.newTab": "New tab",
+    "browser.tabN": "Tab {n}",
+    "browser.addTab": "New tab",
+    "browser.closeTab": "Close tab",
+    "browser.close": "Close browser",
+    "browser.fullscreen": "Fullscreen",
+    "browser.exitFullscreen": "Exit fullscreen",
+    "browser.back": "Back",
+    "browser.forward": "Forward",
+    "browser.reload": "Reload",
+    "browser.urlPlaceholder": "Search or enter address",
+    "browser.loadFailed": "Could not load this page",
     "background.title": "Background Tasks",
     "background.running": "Running {n}",
     "background.finished": "Finished {n}",
@@ -667,6 +681,19 @@ const STRINGS = {
     "terminal.exitFullscreen": "Vollbild verlassen",
     "terminal.exited": "Prozess mit Code {code} beendet",
     "terminal.resize": "Zum Anpassen ziehen",
+    "browser.open": "Browser",
+    "browser.newTab": "Neuer Tab",
+    "browser.tabN": "Tab {n}",
+    "browser.addTab": "Neuer Tab",
+    "browser.closeTab": "Tab schließen",
+    "browser.close": "Browser schließen",
+    "browser.fullscreen": "Vollbild",
+    "browser.exitFullscreen": "Vollbild verlassen",
+    "browser.back": "Zurück",
+    "browser.forward": "Vorwärts",
+    "browser.reload": "Neu laden",
+    "browser.urlPlaceholder": "Suchen oder Adresse eingeben",
+    "browser.loadFailed": "Seite konnte nicht geladen werden",
     "background.title": "Background Tasks",
     "background.running": "{n} läuft",
     "background.finished": "{n} abgeschlossen",
@@ -2053,6 +2080,9 @@ const App = () => {
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [backgroundFull, setBackgroundFull] = useState(false);
   const [backgroundClosing, setBackgroundClosing] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserFull, setBrowserFull] = useState(false);
+  const [browserClosing, setBrowserClosing] = useState(false);
   const [backgroundWake, setBackgroundWake] = useState(0);
   const [termTabs, setTermTabs] = useState([]);
   const [termActive, setTermActive] = useState(0);
@@ -2060,6 +2090,7 @@ const App = () => {
   const termSeq = useRef(0);
   const termCloseTimer = useRef(null);
   const backgroundCloseTimer = useRef(null);
+  const browserCloseTimer = useRef(null);
   const backgroundPumpRef = useRef(false);
   const [pendingCompact, setPendingCompact] = useState(null);
   const [compressing, setCompressing] = useState(false);
@@ -2846,23 +2877,42 @@ const App = () => {
     runContextCompaction();
   };
 
+  const closeDockExcept = (keep) => {
+    if (termCloseTimer.current) {
+      clearTimeout(termCloseTimer.current);
+      termCloseTimer.current = null;
+    }
+    setTermClosing(false);
+    if (keep !== "terminal") {
+      setTerminalOpen(false);
+      setTerminalFull(false);
+      setTermTabs([]);
+    }
+    if (backgroundCloseTimer.current) {
+      clearTimeout(backgroundCloseTimer.current);
+      backgroundCloseTimer.current = null;
+    }
+    setBackgroundClosing(false);
+    if (keep !== "background") {
+      setBackgroundOpen(false);
+      setBackgroundFull(false);
+    }
+    if (browserCloseTimer.current) {
+      clearTimeout(browserCloseTimer.current);
+      browserCloseTimer.current = null;
+    }
+    setBrowserClosing(false);
+    if (keep !== "browser") {
+      setBrowserOpen(false);
+      setBrowserFull(false);
+    }
+    setInspectorOpen(false);
+  };
+
   const openRightPanel = (view) => {
     if (view === "background") {
       setRightPanel("");
-      if (termCloseTimer.current) {
-        clearTimeout(termCloseTimer.current);
-        termCloseTimer.current = null;
-      }
-      setTerminalOpen(false);
-      setTerminalFull(false);
-      setTermClosing(false);
-      setTermTabs([]);
-      if (backgroundCloseTimer.current) {
-        clearTimeout(backgroundCloseTimer.current);
-        backgroundCloseTimer.current = null;
-      }
-      setInspectorOpen(false);
-      setBackgroundClosing(false);
+      closeDockExcept("background");
       setBackgroundOpen(true);
       return;
     }
@@ -2908,28 +2958,38 @@ const App = () => {
     }, 260);
   };
 
+  const closeBrowser = () => {
+    if (browserCloseTimer.current) {
+      clearTimeout(browserCloseTimer.current);
+    }
+    setBrowserOpen(false);
+    setBrowserFull(false);
+    setBrowserClosing(true);
+    browserCloseTimer.current = setTimeout(() => {
+      setBrowserClosing(false);
+      browserCloseTimer.current = null;
+    }, 260);
+  };
+
   const toggleTerminal = () => {
     if (terminalOpen) {
       closeTerminal();
       return;
     }
-    if (termCloseTimer.current) {
-      clearTimeout(termCloseTimer.current);
-      termCloseTimer.current = null;
-    }
-    setTermClosing(false);
-    if (backgroundCloseTimer.current) {
-      clearTimeout(backgroundCloseTimer.current);
-      backgroundCloseTimer.current = null;
-    }
-    setBackgroundOpen(false);
-    setBackgroundFull(false);
-    setBackgroundClosing(false);
-    setInspectorOpen(false);
+    closeDockExcept("terminal");
     if (!termTabs.length) {
       addTermTab();
     }
     setTerminalOpen(true);
+  };
+
+  const toggleBrowser = () => {
+    if (browserOpen) {
+      closeBrowser();
+      return;
+    }
+    closeDockExcept("browser");
+    setBrowserOpen(true);
   };
 
   const closeTermTab = (id) => {
@@ -2969,7 +3029,7 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (!terminalOpen && !backgroundOpen) {
+    if (!terminalOpen && !backgroundOpen && !browserOpen) {
       return;
     }
     const onResize = () => {
@@ -2980,7 +3040,7 @@ const App = () => {
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [terminalOpen, backgroundOpen, sidebarCollapsed]);
+  }, [terminalOpen, backgroundOpen, browserOpen, sidebarCollapsed]);
 
   useEffect(() => {
     const chatId = activeChat?.id || "";
@@ -3486,7 +3546,7 @@ const App = () => {
   };
 
   return (
-    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""} ${backgroundOpen ? "background-open" : ""} ${backgroundOpen && backgroundFull ? "background-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
+    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""} ${backgroundOpen ? "background-open" : ""} ${backgroundOpen && backgroundFull ? "background-full" : ""} ${browserOpen ? "browser-open" : ""} ${browserOpen && browserFull ? "browser-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
       <header className="titlebar">
         <div className="titlebar-left">
           <button className="chrome-button sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? t("title.sidebarOpen") : t("title.sidebarClose")}>
@@ -3606,6 +3666,9 @@ const App = () => {
         </aside>
 
         <main className={messages.length ? "chat-panel has-messages" : "chat-panel is-empty"}>
+          <button className={browserOpen ? "browser-toggle is-on" : "browser-toggle"} onClick={toggleBrowser} title={t("browser.open")}>
+            <AppWindow size={14} />
+          </button>
           <button className={terminalOpen ? "terminal-toggle is-on" : "terminal-toggle"} onClick={toggleTerminal} title={t("terminal.open")}>
             <Terminal size={14} />
           </button>
@@ -3721,7 +3784,7 @@ const App = () => {
           </div>
         </main>
 
-        {inspectorOpen && !terminalOpen && (
+        {inspectorOpen && !terminalOpen && !browserOpen && (
           <aside className="inspector">
             <div className="panel-header compact">
               <div>
@@ -3732,7 +3795,7 @@ const App = () => {
             <pre className="file-preview">{selectedContent || t("inspector.previewHint")}</pre>
           </aside>
         )}
-        {(terminalOpen && !terminalFull) || (backgroundOpen && !backgroundFull) ? (
+        {(terminalOpen && !terminalFull) || (backgroundOpen && !backgroundFull) || (browserOpen && !browserFull) ? (
           <div className="terminal-resizer" onMouseDown={startTermResize} title={t("terminal.resize")} />
         ) : null}
         {(terminalOpen || termClosing) && (
@@ -3754,6 +3817,29 @@ const App = () => {
             full={backgroundFull}
             onToggleFull={() => setBackgroundFull((value) => !value)}
             onClose={closeBackground}
+          />
+        )}
+        {(browserOpen || browserClosing) && (
+          <BrowserPanel
+            api={api}
+            full={browserFull}
+            open={browserOpen}
+            labels={{
+              newTab: t("browser.newTab"),
+              tabN: (n) => t("browser.tabN", { n }),
+              addTab: t("browser.addTab"),
+              closeTab: t("browser.closeTab"),
+              close: t("browser.close"),
+              fullscreen: t("browser.fullscreen"),
+              exitFullscreen: t("browser.exitFullscreen"),
+              back: t("browser.back"),
+              forward: t("browser.forward"),
+              reload: t("browser.reload"),
+              urlPlaceholder: t("browser.urlPlaceholder"),
+              loadFailed: t("browser.loadFailed"),
+            }}
+            onToggleFull={() => setBrowserFull((value) => !value)}
+            onClose={closeBrowser}
           />
         )}
       </div>
