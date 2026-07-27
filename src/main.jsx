@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import MarkdownMessage from "./Markdown.jsx";
 import BrowserPanel from "./browser/BrowserPanel.jsx";
+import { useBrowserController } from "./browser/useBrowserController.js";
 import "./styles.css";
 
 let LANG = "en";
@@ -251,6 +252,16 @@ const STRINGS = {
     "perso.narratorEnableSub": "Shows the model's reasoning",
     "toollabel.webSearch": "Searching the web",
     "toollabel.analyzeImage": "Analyzing image",
+    "toollabel.browserTabs": "Managing browser tabs",
+    "toollabel.browserNavigate": "Navigating browser",
+    "toollabel.browserSnapshot": "Reading browser page",
+    "toollabel.browserClick": "Clicking {x}",
+    "toollabel.browserType": "Typing in {x}",
+    "toollabel.browserKey": "Pressing {x}",
+    "toollabel.browserScroll": "Scrolling browser page",
+    "toollabel.browserWait": "Waiting for browser page",
+    "toollabel.browserVision": "Analyzing browser visually",
+    "toollabel.browserVisualClick": "Clicking visual target {x}",
     "toollabel.datetime": "Checking the date and time",
     "toollabel.agentStatus": "Agent status · {x}",
     "toollabel.maxOutput": "MaxOutputErr",
@@ -370,6 +381,9 @@ const STRINGS = {
     "approval.questionAddMcp": "May I add and connect the MCP server “{x}”?",
     "approval.questionRemember": "May I save this memory?",
     "approval.questionForget": "May I delete this memory?",
+    "approval.questionBrowserVision": "May I send the visible browser page to OpenRouter for visual analysis?",
+    "approval.browserVisionTarget": "Visible browser page",
+    "approval.allowBrowserVisionChat": "Yes, and allow browser vision for this chat",
     "approval.yes": "Yes",
     "approval.no": "No, tell it what to do differently",
     "approval.skip": "Skip",
@@ -648,6 +662,16 @@ const STRINGS = {
     "perso.narratorEnableSub": "Zeigt das Reasoning des Modells",
     "toollabel.webSearch": "Durchsucht das Web",
     "toollabel.analyzeImage": "Bild wird analysiert",
+    "toollabel.browserTabs": "Verwaltet Browser-Tabs",
+    "toollabel.browserNavigate": "Navigiert im Browser",
+    "toollabel.browserSnapshot": "Liest die Browserseite",
+    "toollabel.browserClick": "Klickt {x}",
+    "toollabel.browserType": "Schreibt in {x}",
+    "toollabel.browserKey": "Drückt {x}",
+    "toollabel.browserScroll": "Scrollt die Browserseite",
+    "toollabel.browserWait": "Wartet auf die Browserseite",
+    "toollabel.browserVision": "Analysiert den Browser visuell",
+    "toollabel.browserVisualClick": "Klickt visuelles Ziel {x}",
     "toollabel.datetime": "Prüft Datum und Uhrzeit",
     "toollabel.agentStatus": "Agent-Status · {x}",
     "toollabel.maxOutput": "MaxOutputErr",
@@ -767,6 +791,9 @@ const STRINGS = {
     "approval.questionAddMcp": "Darf ich den MCP-Server „{x}“ hinzufügen und verbinden?",
     "approval.questionRemember": "Darf ich mir das dauerhaft merken?",
     "approval.questionForget": "Darf ich diese Erinnerung löschen?",
+    "approval.questionBrowserVision": "Darf ich die sichtbare Browserseite zur visuellen Analyse an OpenRouter senden?",
+    "approval.browserVisionTarget": "Sichtbare Browserseite",
+    "approval.allowBrowserVisionChat": "Ja, und Browser-Vision für diesen Chat erlauben",
     "approval.yes": "Ja",
     "approval.no": "Nein, sag was anders gemacht werden soll",
     "approval.skip": "Überspringen",
@@ -2905,6 +2932,7 @@ const App = () => {
     if (keep !== "browser") {
       setBrowserOpen(false);
       setBrowserFull(false);
+      browserController.reset();
     }
     setInspectorOpen(false);
   };
@@ -2967,6 +2995,7 @@ const App = () => {
     setBrowserClosing(true);
     browserCloseTimer.current = setTimeout(() => {
       setBrowserClosing(false);
+      browserController.reset();
       browserCloseTimer.current = null;
     }, 260);
   };
@@ -2991,6 +3020,14 @@ const App = () => {
     closeDockExcept("browser");
     setBrowserOpen(true);
   };
+
+  const browserController = useBrowserController({
+    api,
+    onOpen: () => {
+      closeDockExcept("browser");
+      setBrowserOpen(true);
+    },
+  });
 
   const closeTermTab = (id) => {
     if (termTabs.length <= 1) {
@@ -3822,6 +3859,7 @@ const App = () => {
         {(browserOpen || browserClosing) && (
           <BrowserPanel
             api={api}
+            controller={browserController}
             full={browserFull}
             open={browserOpen}
             labels={{
@@ -5714,6 +5752,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
   const isWrite = Boolean(result.write);
   const isAddMcp = Boolean(result.addMcp);
   const isMemory = Boolean(result.memory);
+  const isBrowserVision = Boolean(result.browserVision);
   const isAgentPermission = Boolean(result.agentName);
   const command = result.command || tool.args?.command || "";
   const tier = result.mcpTier || result.tier || "";
@@ -5724,6 +5763,8 @@ const ApprovalForm = ({ tool, onResolve }) => {
       ? `${result.mcpServer} · ${result.mcpTool}`
       : isWrite
         ? (tool.args?.path || result.path || "file")
+        : isBrowserVision
+          ? t("approval.browserVisionTarget")
         : (command || tool.name);
   const stickyOptions = Array.isArray(result.stickyOptions) ? result.stickyOptions : [];
   const optionKey = (opt) => (typeof opt === "object" ? opt.type : opt);
@@ -5739,7 +5780,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
       return t("approval.allowReadonly", { x: result.mcpServer });
     }
     if (opt === "chat") {
-      return t("approval.allowChat");
+      return isBrowserVision ? t("approval.allowBrowserVisionChat") : t("approval.allowChat");
     }
     if (opt === "dangerous-scope") {
       return t("approval.allowScope");
@@ -5765,7 +5806,9 @@ const ApprovalForm = ({ tool, onResolve }) => {
     const opt = extras.find((entry) => optionKey(entry) === choice);
     onResolve({ approved: true, stickyGrant: opt && typeof opt === "object" ? { type: opt.type } : { type: choice } });
   };
-  const question = isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMemory ? t(result.memoryAction === "delete" ? "approval.questionForget" : "approval.questionRemember") : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand"))));
+  const question = isBrowserVision
+    ? t("approval.questionBrowserVision")
+    : (isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMemory ? t(result.memoryAction === "delete" ? "approval.questionForget" : "approval.questionRemember") : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand")))));
   return (
     <div className="approval-form">
       {result.agentName && <div className="approval-agent">{t("approval.agentRequest", { name: result.agentName })}</div>}
@@ -6301,6 +6344,9 @@ const getToolIcon = (name = "") => {
   if (lower === "web_search") {
     return GlobeCheckIcon;
   }
+  if (lower.startsWith("browser_")) {
+    return Globe;
+  }
   if (lower === "remember" || lower === "forget" || lower === "list_memories") {
     return LayoutDashboardIcon;
   }
@@ -6375,6 +6421,36 @@ const getToolLabel = (tool) => {
   }
   if (name === "list_memories") {
     return t("toollabel.listMemories");
+  }
+  if (name === "browser_tabs") {
+    return t("toollabel.browserTabs");
+  }
+  if (name === "browser_navigate") {
+    return t("toollabel.browserNavigate");
+  }
+  if (name === "browser_snapshot") {
+    return t("toollabel.browserSnapshot");
+  }
+  if (name === "browser_click") {
+    return t("toollabel.browserClick", { x: tool.args?.ref || "" });
+  }
+  if (name === "browser_type") {
+    return t("toollabel.browserType", { x: tool.args?.ref || "" });
+  }
+  if (name === "browser_key") {
+    return t("toollabel.browserKey", { x: tool.args?.key || "" });
+  }
+  if (name === "browser_scroll") {
+    return t("toollabel.browserScroll");
+  }
+  if (name === "browser_wait") {
+    return t("toollabel.browserWait");
+  }
+  if (name === "browser_visual_analyze") {
+    return t("toollabel.browserVision");
+  }
+  if (name === "browser_visual_click") {
+    return t("toollabel.browserVisualClick", { x: tool.args?.ref || "" });
   }
   if (result.denied) {
     return t("toollabel.denied", { x: command || path || tool.name || "" });

@@ -100,4 +100,13 @@ contextBridge.exposeInMainWorld("agentApi", {
     ipcRenderer.on("browser:popup", listener);
     return () => ipcRenderer.removeListener("browser:popup", listener);
   },
+  registerBrowserTab: (payload) => ipcRenderer.invoke("browser:register-tab", payload),
+  unregisterBrowserTab: (payload) => ipcRenderer.invoke("browser:unregister-tab", payload),
+  setActiveBrowserTab: (payload) => ipcRenderer.invoke("browser:set-active-tab", payload),
+  resolveBrowserCommand: (payload) => ipcRenderer.invoke("browser:command-result", payload),
+  onBrowserCommand: (handler) => {
+    const listener = (_, command) => handler(command);
+    ipcRenderer.on("browser:command", listener);
+    return () => ipcRenderer.removeListener("browser:command", listener);
+  },
 });
