@@ -123,6 +123,7 @@ const STRINGS = {
     "cluster.reads": "Read {n} files",
     "cluster.mcp": "Ran {n} MCP commands",
     "cluster.searches": "Searched {n} strings",
+    "cluster.browser": "Used the browser {n} times",
     "combine.searches.one": "searched {n} string",
     "combine.searches.other": "searched {n} strings",
     "combine.reads.one": "read {n} file",
@@ -131,6 +132,8 @@ const STRINGS = {
     "combine.commands.other": "ran {n} commands",
     "combine.mcp.one": "{n} MCP call",
     "combine.mcp.other": "{n} MCP calls",
+    "combine.browser.one": "{n} browser action",
+    "combine.browser.other": "{n} browser actions",
     "combine.edits.one": "edited {n} file",
     "combine.edits.other": "edited {n} files",
     "row.read": "Read {x}",
@@ -533,6 +536,7 @@ const STRINGS = {
     "cluster.reads": "{n} Dateien gelesen",
     "cluster.mcp": "{n} MCP-Befehle ausgeführt",
     "cluster.searches": "{n} Strings durchsucht",
+    "cluster.browser": "{n} Browseraktionen ausgeführt",
     "combine.searches.one": "{n} String durchsucht",
     "combine.searches.other": "{n} Strings durchsucht",
     "combine.reads.one": "{n} Datei gelesen",
@@ -541,6 +545,8 @@ const STRINGS = {
     "combine.commands.other": "{n} Befehle ausgeführt",
     "combine.mcp.one": "{n} MCP-Aufruf",
     "combine.mcp.other": "{n} MCP-Aufrufe",
+    "combine.browser.one": "{n} Browseraktion",
+    "combine.browser.other": "{n} Browseraktionen",
     "combine.edits.one": "{n} Datei bearbeitet",
     "combine.edits.other": "{n} Dateien bearbeitet",
     "row.read": "{x} gelesen",
@@ -4498,6 +4504,25 @@ const FolderSearchIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const SummaryIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M15 4H7" />
+    <path d="m18 16 3 3-3 3" />
+    <path d="M3 4v13a2 2 0 0 0 2 2h16" />
+    <path d="M7 14h7" />
+    <path d="M7 9h12" />
+  </svg>
+);
+
+const SquareChartGanttIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 8h7" />
+    <path d="M8 12h6" />
+    <path d="M11 16h5" />
+  </svg>
+);
+
 const CombineIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="M14 3a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1" />
@@ -5523,6 +5548,9 @@ const clusterKind = (tool) => {
   if (tool.name === "grep_files") {
     return "searches";
   }
+  if ((tool.name || "").startsWith("browser_")) {
+    return "browser";
+  }
   return null;
 };
 
@@ -5696,14 +5724,16 @@ const ClusterRow = ({ tool }) => {
 };
 
 const CommandGroup = ({ tools, kind }) => {
-  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : FolderSearchIcon;
+  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : FolderSearchIcon;
   const label = kind === "commands"
     ? t("cluster.commands", { n: tools.length })
     : kind === "mcp"
       ? t("cluster.mcp", { n: tools.length })
       : kind === "searches"
         ? t("cluster.searches", { n: tools.length })
-        : t("cluster.reads", { n: tools.length });
+        : kind === "browser"
+          ? t("cluster.browser", { n: tools.length })
+          : t("cluster.reads", { n: tools.length });
   return (
     <details className="cmd-group">
       <summary>
@@ -6343,6 +6373,12 @@ const getToolIcon = (name = "") => {
   }
   if (lower === "web_search") {
     return GlobeCheckIcon;
+  }
+  if (lower === "list_files") {
+    return SummaryIcon;
+  }
+  if (lower === "read_file") {
+    return SquareChartGanttIcon;
   }
   if (lower.startsWith("browser_")) {
     return Globe;
