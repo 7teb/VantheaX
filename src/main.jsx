@@ -4496,6 +4496,14 @@ const WorkflowIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const FolderSearchIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <circle cx="11.5" cy="12.5" r="2.5" />
+    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    <path d="M13.3 14.3 15 16" />
+  </svg>
+);
+
 const SummaryIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="M15 4H7" />
@@ -5716,7 +5724,7 @@ const ClusterRow = ({ tool }) => {
 };
 
 const CommandGroup = ({ tools, kind }) => {
-  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : SummaryIcon;
+  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : FolderSearchIcon;
   const label = kind === "commands"
     ? t("cluster.commands", { n: tools.length })
     : kind === "mcp"

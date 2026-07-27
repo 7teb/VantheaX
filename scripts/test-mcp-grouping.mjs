@@ -115,6 +115,6 @@ check(initialReadGroup.length === 2, "file listing stays separate from the follo
 check(initialReadGroup[1].kind === "bundle", "file outlines use the read bundle");
 check(initialReadGroup[1].tools.length === 3, "three file outlines form one read group");
 check(clusterKind(outlinedFiles[0].tool) === "reads", "file outlines are classified as reads");
-check(source.includes(": SummaryIcon;"), "read bundles use the summary icon");
+check(source.includes(": FolderSearchIcon;"), "read bundles keep the folder search icon");
 
 console.log(`${passed} tool grouping checks passed`);
