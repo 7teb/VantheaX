@@ -262,6 +262,27 @@ export const createBackgroundTaskManager = ({
     })
     .map(publicTask);
 
+  const resolve = (id, chatId = "") => {
+    const requested = String(id || "").trim();
+    const candidates = [...tasks.values()]
+      .filter((task) => !chatId || task.chatId === String(chatId));
+    const exact = candidates.find((task) => task.id === requested);
+    if (exact) {
+      return { status: "resolved", task: storedTask(exact), matches: [exact.id] };
+    }
+    const matches = requested
+      ? candidates.filter((task) => task.id.startsWith(requested))
+      : [];
+    if (matches.length === 1) {
+      return { status: "resolved", task: storedTask(matches[0]), matches: [matches[0].id] };
+    }
+    return {
+      status: matches.length > 1 ? "ambiguous" : "not_found",
+      task: null,
+      matches: matches.slice(0, 8).map((task) => task.id),
+    };
+  };
+
   const get = (id) => {
     const task = tasks.get(String(id || ""));
     return task ? storedTask(task) : null;
@@ -367,6 +388,7 @@ export const createBackgroundTaskManager = ({
     initialize,
     start,
     list,
+    resolve,
     get,
     cancel,
     clearFinished,

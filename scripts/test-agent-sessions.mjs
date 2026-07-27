@@ -31,6 +31,9 @@ for (let index = 0; index < 4; index += 1) {
 }
 
 assert.equal(values.every((value) => value.session && value.run), true);
+assert.equal(manager.resolve(values[0].session.id.slice(0, -1), "chat-1").session.id, values[0].session.id);
+assert.equal(manager.resolve("agent_", "chat-1").status, "ambiguous");
+assert.equal(manager.resolve(values[0].session.id.slice(0, -1), "chat-2").status, "not_found");
 const overflow = await manager.begin({
   chatId: "chat-1",
   turnId: "turn-1",
@@ -76,7 +79,7 @@ assert.equal(await manager.settleNotification(notification.id, true), true);
 assert.equal(await manager.claimPending("chat-1"), null);
 
 const continued = await manager.begin({
-  agentId: first.session.id,
+  agentId: first.session.id.slice(0, -1),
   chatId: "chat-1",
   turnId: "turn-2",
   projectPath: "D:\\project",

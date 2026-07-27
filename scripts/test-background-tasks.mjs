@@ -59,6 +59,8 @@ assert.equal(started.started, true);
 assert.equal(started.status, "running");
 assert.equal(manager.list("chat-a").length, 1);
 assert.equal(events[0].type, "started");
+assert.equal(manager.resolve(started.id.slice(0, -1), "chat-a").task.id, started.id);
+assert.equal(manager.resolve(started.id.slice(0, -1), "chat-b").status, "not_found");
 
 children[0].stdout.write("first output\n");
 children[0].stderr.write("warning\n");
@@ -86,6 +88,7 @@ const canceled = await manager.start({
   category: "Build",
   command: "npm.cmd run package",
 });
+assert.equal(manager.resolve("bg_", "chat-a").status, "ambiguous");
 await manager.cancel(canceled.id);
 assert.equal(manager.get(canceled.id).status, "canceled");
 assert.deepEqual(killed, [7001]);

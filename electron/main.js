@@ -74,6 +74,13 @@ const capToolContent = (result) => {
   return `${kept}\n[tool output truncated: ${raw.length - kept.length} chars over the ${toolResultMaxTokens}-token cap]`;
 };
 
+const idResolutionError = (label, requested, resolved) => {
+  if (resolved?.status === "ambiguous") {
+    return `${label} id "${String(requested || "")}" is ambiguous in this chat. Use a longer prefix or one of these full ids: ${resolved.matches.join(", ")}.`;
+  }
+  return `${label} not found in this chat.`;
+};
+
 const getUserFile = (name) => path.join(app.getPath("userData"), name);
 
 const getDefaultWorkspace = () => path.join(app.getPath("userData"), "workspace");
@@ -1183,7 +1190,7 @@ const toolSpecs = [
     type: "function",
     function: {
       name: "get_background_task",
-      description: "Read the current status and captured output tail of a background task by ID. Use this only when you need to inspect a task before its automatic completion notification arrives.",
+      description: "Read the current status and captured output tail of a background task by ID. The full ID or a unique leading prefix such as bg_b6436328 is accepted; ambiguous prefixes are rejected. The result always contains the full canonical ID. Use this only when you need to inspect a task before its automatic completion notification arrives.",
       parameters: {
         type: "object",
         properties: {
@@ -1217,7 +1224,7 @@ const toolSpecs = [
     type: "function",
     function: {
       name: "continue_agent",
-      description: "Launch another background run of an existing agent with its preserved context and return immediately. Use the exact agent_id previously returned by deploy_agent. Use this only when the same specialist genuinely benefits from its earlier findings; never use it for a simple task. The agent keeps its name, description and tool profile, uses the current chat permission mode for this run, and cannot speak to the user or deploy other agents. You receive its report later through an automatic internal completion event, and can check progress with get_agent_status(agent_id).",
+      description: "Launch another background run of an existing agent with its preserved context and return immediately. Use the full agent_id previously returned by deploy_agent or a unique leading prefix such as agent_291420f1; ambiguous prefixes are rejected. The result always contains the full canonical agent_id. Use this only when the same specialist genuinely benefits from its earlier findings; never use it for a simple task. The agent keeps its name, description and tool profile, uses the current chat permission mode for this run, and cannot speak to the user or deploy other agents. You receive its report later through an automatic internal completion event, and can check progress with get_agent_status(agent_id).",
       parameters: {
         type: "object",
         properties: {
@@ -1234,7 +1241,7 @@ const toolSpecs = [
     type: "function",
     function: {
       name: "get_agent_status",
-      description: "Read the current status and recent progress of an agent you deployed, by its agent_id. Returns whether it is still running or finished, its runtime, how many tool calls it has made, the names of its most recent actions, a short snippet of its latest output, and its full report once finished. Use this to check on an agent instead of running shell commands against the app's own data files. It returns an immediate snapshot and never blocks or waits. You also receive an automatic internal completion event when the agent finishes, so do NOT call this in a tight polling loop.",
+      description: "Read the current status and recent progress of an agent you deployed, by its agent_id. The full ID or a unique leading prefix such as agent_291420f1 is accepted; ambiguous prefixes are rejected. The result always contains the full canonical agent_id. Returns whether it is still running or finished, its runtime, how many tool calls it has made, the names of its most recent actions, a short snippet of its latest output, and its full report once finished. Use this to check on an agent instead of running shell commands against the app's own data files. It returns an immediate snapshot and never blocks or waits. You also receive an automatic internal completion event when the agent finishes, so do NOT call this in a tight polling loop.",
       parameters: {
         type: "object",
         properties: {
@@ -2691,19 +2698,23 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
     return await getFileOutline(projectPath, args.path);
   }
   if (name === "get_background_task") {
-    const task = backgroundTaskManager?.get(args.id);
-    if (!task || task.chatId !== String(chatId || "")) {
-      return { error: "Background task not found in this chat." };
+    if (!backgroundTaskManager) {
+      return { error: "Background task manager is unavailable." };
     }
-    return { backgroundTask: true, ...task };
+    const resolved = backgroundTaskManager.resolve(args.id, chatId);
+    if (!resolved.task) {
+      return { error: idResolutionError("Background task", args.id, resolved) };
+    }
+    return { backgroundTask: true, ...resolved.task };
   }
   if (name === "get_agent_status") {
     if (!agentSessionManager) {
       return { error: "Agent session manager is unavailable." };
     }
-    const session = agentSessionManager.get(args.agent_id);
-    if (!session || session.chatId !== String(chatId || "")) {
-      return { error: "No agent with that id was deployed in this chat." };
+    const resolved = agentSessionManager.resolve(args.agent_id, chatId);
+    const session = resolved.session;
+    if (!session) {
+      return { error: idResolutionError("Agent", args.agent_id, resolved) };
     }
     const runs = Array.isArray(session.runs) ? session.runs : [];
     const run = runs.find((item) => item.id === session.currentRunId) || runs[runs.length - 1];
@@ -3983,9 +3994,10 @@ const runDelegatedAgentTask = async ({
   if (!agentSessionManager) {
     return { error: "Agent session manager is unavailable." };
   }
-  const existing = action === "continue" ? agentSessionManager.get(args.agent_id) : null;
+  const resolved = action === "continue" ? agentSessionManager.resolve(args.agent_id, chatId) : null;
+  const existing = resolved?.session || null;
   if (action === "continue" && !existing) {
-    return { error: "Agent context not found in this chat." };
+    return { error: idResolutionError("Agent", args.agent_id, resolved) };
   }
   const profile = action === "continue" ? existing.profile : (args.profile === "worker" ? "worker" : "explore");
   if (planMode && profile !== "explore") {
@@ -4001,7 +4013,7 @@ const runDelegatedAgentTask = async ({
   }
   const effort = resolveAgentEffort(modelEntry, payload.effort, existing?.effort);
   const started = await agentSessionManager.begin({
-    agentId: action === "continue" ? args.agent_id : "",
+    agentId: action === "continue" ? existing.id : "",
     chatId,
     turnId,
     projectPath,

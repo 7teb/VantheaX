@@ -220,6 +220,35 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     return run?.status === "running";
   }).length;
 
+  const resolveSession = (agentId, chatId = "") => {
+    const requested = String(agentId || "").trim();
+    const candidates = [...sessions.values()]
+      .filter((session) => !chatId || session.chatId === String(chatId));
+    const exact = candidates.find((session) => session.id === requested);
+    if (exact) {
+      return { status: "resolved", session: exact, matches: [exact.id] };
+    }
+    const matches = requested
+      ? candidates.filter((session) => session.id.startsWith(requested))
+      : [];
+    if (matches.length === 1) {
+      return { status: "resolved", session: matches[0], matches: [matches[0].id] };
+    }
+    return {
+      status: matches.length > 1 ? "ambiguous" : "not_found",
+      session: null,
+      matches: matches.slice(0, 8).map((session) => session.id),
+    };
+  };
+
+  const resolve = (agentId, chatId = "") => {
+    const found = resolveSession(agentId, chatId);
+    return {
+      ...found,
+      session: found.session ? clone(storedSession(found.session)) : null,
+    };
+  };
+
   const begin = async ({ agentId = "", chatId, turnId, projectPath, name, description, model, effort, profile, prompt }) => {
     if (runningCount() >= 4) {
       return { error: "At most 4 agents can run at once." };
@@ -230,8 +259,12 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     }
     let session;
     if (agentId) {
-      session = sessions.get(String(agentId));
-      if (!session || session.chatId !== String(chatId || "")) {
+      const found = resolveSession(agentId, chatId);
+      session = found.session;
+      if (!session) {
+        if (found.status === "ambiguous") {
+          return { error: `Agent id "${String(agentId)}" is ambiguous in this chat. Use a longer id.` };
+        }
         return { error: "Agent context not found in this chat." };
       }
       const active = session.runs.find((entry) => entry.id === session.currentRunId);
@@ -605,6 +638,7 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     finish,
     cancel,
     list,
+    resolve,
     get,
     getTranscript,
     claimPending,
