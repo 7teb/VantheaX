@@ -4472,6 +4472,10 @@ textarea {
   color: var(--icon);
 }
 
+.summary-icon {
+  transform: translate(-1px, -1px);
+}
+
 .tool-step.memory > summary .step-marker {
   width: 16px;
   margin-top: -1px;
