@@ -5276,6 +5276,57 @@ textarea {
   background: var(--text);
 }
 
+.policy-card {
+  margin: 14px 0 6px;
+  padding: 13px 16px 14px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .03);
+  border: 1px solid color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
+.policy-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 11px;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text);
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+
+.policy-card-head svg {
+  color: var(--danger);
+  flex: none;
+}
+
+.policy-card-body {
+  margin-top: 12px;
+  color: var(--text);
+  line-height: 1.55;
+  font-size: 13.5px;
+}
+
+.policy-card-detail {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .04);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.policy-card-foot {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255, 255, 255, .08);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
 .plan-card {
   margin: 14px 0 6px;
   padding: 13px 16px 14px;

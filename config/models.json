@@ -11,6 +11,17 @@
     "maxOutput": 131072
   },
   {
+    "id": "deepseek/deepseek-v4-flash-0731",
+    "label": "DeepSeek V4 Flash 0731",
+    "provider": "DeepSeek",
+    "providerKey": "deepseek",
+    "efforts": ["high", "xhigh"],
+    "defaultEffort": "high",
+    "supportsVision": false,
+    "contextLength": 1048576,
+    "maxOutput": 384000
+  },
+  {
     "id": "deepseek/deepseek-v4-pro",
     "label": "DeepSeek V4 Pro",
     "provider": "DeepSeek",
@@ -53,6 +64,28 @@
     "supportsVision": true,
     "contextLength": 1000000,
     "maxOutput": 65536
+  },
+  {
+    "id": "openai/gpt-5.6-luna",
+    "label": "GPT 5.6 Luna",
+    "provider": "OpenAI",
+    "providerKey": "openai",
+    "efforts": ["low", "medium", "high", "xhigh"],
+    "defaultEffort": "high",
+    "supportsVision": true,
+    "contextLength": 1050000,
+    "maxOutput": 128000
+  },
+  {
+    "id": "openai/gpt-5.6-luna-pro",
+    "label": "GPT 5.6 Luna Pro",
+    "provider": "OpenAI",
+    "providerKey": "openai",
+    "efforts": ["low", "medium", "high", "xhigh"],
+    "defaultEffort": "xhigh",
+    "supportsVision": true,
+    "contextLength": 1050000,
+    "maxOutput": 128000
   },
   {
     "id": "nvidia:deepseek-ai/deepseek-v4-flash",

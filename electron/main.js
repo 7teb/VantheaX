@@ -3168,13 +3168,16 @@ const nvidiaBody = (entry, settings, effort, messages, tools) => {
 
 const openRouterBody = (model, effort, messages, tools) => {
   const body = { model, messages, tools, tool_choice: "auto", temperature: 0.2 };
-  if (effort && (model.includes("deepseek") || model.includes("qwen") || model.includes("glm"))) {
+  if (effort && (model.includes("deepseek") || model.includes("qwen") || model.includes("glm") || model.startsWith("openai/"))) {
     body.reasoning = { effort };
   }
   if (model.includes("deepseek")) {
     body.provider = { order: ["DeepSeek"], allow_fallbacks: false };
   } else if (model.includes("glm")) {
     body.provider = { order: ["Z.AI"], allow_fallbacks: false };
+  } else if (model.startsWith("openai/")) {
+    // first-party only, no fallback: the 50% discount and reasoning.mode pro are honored by OpenAI/Azure alone
+    body.provider = { order: ["OpenAI"], allow_fallbacks: false };
   }
   return body;
 };
@@ -3368,6 +3371,29 @@ const sanitizeErrorText = (settings, text) => {
   }
   return out;
 };
+
+// openai's cyber guardrail, the code is the only stable marker: it rides any status and can arrive mid-stream, nested inside openrouter's metadata.raw
+const cyberPolicyCode = /\\?"(?:code|provider_code|error_code)\\?"\s*:\s*\\?"cyber_policy\\?"/;
+
+const cyberPolicyFrom = (value) => {
+  if (!value) {
+    return null;
+  }
+  let raw = "";
+  try {
+    raw = typeof value === "string" ? value : JSON.stringify(value);
+  } catch {
+    return null;
+  }
+  if (!cyberPolicyCode.test(raw)) {
+    return null;
+  }
+  const found = raw.match(/\\?"message\\?"\s*:\s*\\?"((?:[^"\\]|\\.)*?)\\?"\s*[,}]/);
+  const message = found ? found[1].replace(/\\+"/g, "\"").replace(/\\+n/g, " ").replace(/\s+/g, " ").trim() : "";
+  return { code: "cyber_policy", message: message.slice(0, 600) };
+};
+
+const cyberPolicyError = (policy) => Object.assign(new Error(`OpenAI cybersecurity policy blocked this request: ${policy.message || "no detail returned"}`), { cyberPolicy: policy });
 
 const sleep = (ms, signal) => new Promise((resolve) => {
   if (signal?.aborted) {
@@ -3630,6 +3656,10 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
   }, { retries: 3, signal });
   if (!response.ok) {
     const text = await response.text();
+    const policy = cyberPolicyFrom(text);
+    if (policy) {
+      throw cyberPolicyError(policy);
+    }
     throw new Error(`${label} ${response.status}: ${sanitizeErrorText(settings, text).slice(0, 800)}`);
   }
   const reader = response.body.getReader();
@@ -3638,6 +3668,7 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
   let content = "";
   let reasoning = "";
   let finishReason = "";
+  let cyberPolicy = null;
   const toolCalls = [];
   const progressLines = {};
   const reasoningContentFilter = createReasoningContentFilter();
@@ -3661,6 +3692,9 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
         json = JSON.parse(payload);
       } catch {
         continue;
+      }
+      if (json.error && !cyberPolicy) {
+        cyberPolicy = cyberPolicyFrom(json.error);
       }
       const choice = json.choices?.[0];
       if (choice?.finish_reason) {
@@ -3732,6 +3766,10 @@ const streamOpenRouter = async (settings, body, onEvent, signal, target = null, 
     consume(buffer);
   }
   appendContent(reasoningContentFilter.finish());
+  // a blocked stream leaves a half-streamed tool call behind, and its raw reasoning must not fall through as the answer
+  if (cyberPolicy) {
+    return { role: "assistant", content, finishReason, cyberPolicy };
+  }
   let calls = toolCalls.filter((call) => call.function.name);
   if (!calls.length && content) {
     const recovered = recoverToolCallsFromText(content);
@@ -4508,6 +4546,7 @@ const runAgentStream = async (payload, sender) => {
     let finalText = "";
     let lastFinish = "";
     let overflowCount = 0;
+    let policyStop = null;
     const goalActive = Boolean(payload.goalMode && payload.goal && !payload.planMode);
     let goalRound = 0;
     while (true) {
@@ -4533,6 +4572,10 @@ const runAgentStream = async (payload, sender) => {
           if (controller.signal.aborted) {
             break;
           }
+          if (error?.cyberPolicy) {
+            policyStop = error.cyberPolicy;
+            break;
+          }
           const m = String(error?.message || "");
           if (/\b400\b/.test(m) && /context|token|maximum|too long|length/i.test(m)) {
             throw new Error(`The conversation grew too large for the model's context window during this turn. Use the Compact button or start a new chat. (${m.slice(0, 240)})`);
@@ -4549,6 +4592,10 @@ const runAgentStream = async (payload, sender) => {
         }
         if (message.content) {
           finalText += message.content;
+        }
+        if (message.cyberPolicy) {
+          policyStop = message.cyberPolicy;
+          break;
         }
         lastFinish = message.finishReason || lastFinish;
         const overflowReasoning = message.reasoningText || "";
@@ -4733,7 +4780,7 @@ const runAgentStream = async (payload, sender) => {
           break;
         }
       }
-      if (!goalActive || controller.signal.aborted) {
+      if (!goalActive || controller.signal.aborted || policyStop) {
         break;
       }
       goalRound += 1;
@@ -4751,7 +4798,11 @@ const runAgentStream = async (payload, sender) => {
       contextTracker?.commit();
     }
     const planWasPresented = tools.some((t) => t.name === "present_plan" && t.result?.plan);
-    const fallback = controller.signal.aborted ? finalText : (finalText || (planWasPresented ? "" : `The model ended the turn without a final answer (finish reason: ${lastFinish || "unknown"}). It returned no text and no tool call I could run, it may have emitted a tool call in a format that could not be parsed. Try again, or switch model.`));
+    const policy = policyStop ? { ...policyStop, model: payload.model } : null;
+    if (policy) {
+      emit({ type: "policy", policy });
+    }
+    const fallback = controller.signal.aborted ? finalText : (finalText || (planWasPresented || policy ? "" : `The model ended the turn without a final answer (finish reason: ${lastFinish || "unknown"}). It returned no text and no tool call I could run, it may have emitted a tool call in a format that could not be parsed. Try again, or switch model.`));
     const retainedPaths = mergeReadPaths(payload.readPaths, tools);
     const retainedFiles = await buildReadCache(projectPath, retainedPaths);
     const retainedAssistant = controller.signal.aborted && fallback
@@ -4764,8 +4815,8 @@ const runAgentStream = async (payload, sender) => {
     ];
     const settledUsage = measureContextState({ ...payload, history: retainedHistory, message: "", readPaths: retainedPaths }, index, retainedFiles, contextMcpSpecs);
     contextTracker?.settle(settledUsage);
-    emit({ type: "done", content: fallback, tools });
-    return { content: fallback, tools };
+    emit({ type: "done", content: fallback, tools, policy });
+    return { content: fallback, tools, policy };
   } finally {
     contextTracker?.close();
     narrator.end();

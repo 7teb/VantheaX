@@ -73,6 +73,7 @@ const STRINGS = {
     "composer.removeGoal": "Remove goal",
     "composer.stop": "Stop",
     "composer.naming": "Naming this chat",
+    "composer.sending": "Sending",
     "plus.add": "Add",
     "plus.attach": "Add photos and files",
     "plus.planMode": "Plan mode",
@@ -283,9 +284,11 @@ const STRINGS = {
     "web.topicGeneral": "General",
     "web.topicNews": "News",
     "web.sources": "Sources",
-    "web.searchingFor": "Searching for {q}",
+    "web.searchingWeb": "Searching the web",
     "web.checkingSite": "Searching {site}",
-    "web.searchedFor": "Searched for {q}",
+    "web.searchedSite": "Searched {site}",
+    "web.searchedSites": "Searched {site} +{n}",
+    "web.searchedWeb": "Searched the web",
     "panels.title": "Panels",
     "panels.openRoot": "Open the project folder",
     "terminal.title": "Terminal",
@@ -418,6 +421,9 @@ const STRINGS = {
     "status.analyzingImage": "Analyzing image...",
     "status.stopped": "Stopped",
     "vision.warning": "Current model does not support image parsing.",
+    "policy.title": "Blocked by OpenAI's cybersecurity policy",
+    "policy.body": "OpenAI's safety system flagged this prompt as a possible cybersecurity risk and refused to answer it. This is the provider's guardrail, not VantheaX: nothing was run and nothing was changed.",
+    "policy.foot": "Rephrase the request, or switch to a non-OpenAI model and send it again.",
     "time.now": "now",
     "time.min": "{n}m",
     "time.hour": "{n}h",
@@ -486,6 +492,7 @@ const STRINGS = {
     "composer.removeGoal": "Ziel entfernen",
     "composer.stop": "Stopp",
     "composer.naming": "Chat wird benannt",
+    "composer.sending": "Wird gesendet",
     "plus.add": "Hinzufügen",
     "plus.attach": "Fotos und Dateien hinzufügen",
     "plus.planMode": "Planmodus",
@@ -696,9 +703,11 @@ const STRINGS = {
     "web.topicGeneral": "Allgemein",
     "web.topicNews": "News",
     "web.sources": "Quellen",
-    "web.searchingFor": "Sucht nach {q}",
+    "web.searchingWeb": "Sucht im Web",
     "web.checkingSite": "{site} wird durchsucht",
-    "web.searchedFor": "Nach {q} gesucht",
+    "web.searchedSite": "{site} durchsucht",
+    "web.searchedSites": "{site} +{n} durchsucht",
+    "web.searchedWeb": "Web durchsucht",
     "panels.title": "Panels",
     "panels.openRoot": "Projektordner öffnen",
     "terminal.title": "Terminal",
@@ -831,6 +840,9 @@ const STRINGS = {
     "status.analyzingImage": "Bild wird analysiert...",
     "status.stopped": "Gestoppt",
     "vision.warning": "Aktuelles Modell unterstützt keine Bilder.",
+    "policy.title": "Von OpenAIs Cybersecurity-Richtlinie blockiert",
+    "policy.body": "OpenAIs Sicherheitssystem hat diesen Prompt als möglichen Cybersecurity-Verstoß eingestuft und die Antwort verweigert. Das ist die Sperre des Anbieters, nicht von VantheaX: es wurde nichts ausgeführt und nichts geändert.",
+    "policy.foot": "Formuliere die Anfrage um oder wechsle auf ein Modell außerhalb von OpenAI und schick sie erneut.",
     "time.now": "jetzt",
     "time.min": "{n} Min.",
     "time.hour": "{n} Std.",
@@ -2163,8 +2175,11 @@ const App = () => {
   const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(null);
   const [naming, setNaming] = useState(false);
+  const [sending, setSending] = useState(false);
   const [titleAnim, setTitleAnim] = useState(null);
   const fileInputRef = useRef(null);
+  const sendMessageRef = useRef(null);
+  const sendTimerRef = useRef(0);
   const chatsLoadedRef = useRef(false);
   const activeRequestRef = useRef(null);
   const activeMsgRef = useRef(null);
@@ -3329,6 +3344,11 @@ const App = () => {
           return { ...message, content: `${message.content || ""}${event.delta}`, segments, liveTool: null };
         }), updatedAt: new Date().toISOString() } : item));
       }
+      if (event.type === "policy") {
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
+          message.id === assistantId ? { ...message, policy: event.policy, liveTool: null } : message
+        ), updatedAt: new Date().toISOString() } : item));
+      }
       if (event.type === "tool_progress") {
         narrationStore.suppress(requestId);
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
@@ -3427,7 +3447,7 @@ const App = () => {
         if (isBackgroundContinuation && !hasBackgroundOutput) {
           return { ...item, messages: item.messages.filter((message) => message.id !== assistantId), updatedAt: new Date().toISOString() };
         }
-        return { ...item, messages: item.messages.map((message) => (message.id === assistantId && !message.cancelled) ? { ...message, content: result.content || message.content, tools: result.tools || message.tools || [], done: true, workMs: message.workMs || (Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() };
+        return { ...item, messages: item.messages.map((message) => (message.id === assistantId && !message.cancelled) ? { ...message, content: result.content || message.content, tools: result.tools || message.tools || [], policy: result.policy || message.policy || null, done: true, workMs: message.workMs || (Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() };
       }));
       if (!isBackgroundContinuation && settings.memory?.enabled && result && result.content) {
         const usedTools = Array.isArray(result.tools) && result.tools.some((tl) => tl.name === "web_search" || String(tl.name || "").startsWith("mcp__"));
@@ -3467,6 +3487,27 @@ const App = () => {
     }
     return turnSucceeded;
   };
+
+  sendMessageRef.current = sendMessage;
+
+  // short hold before the turn starts, reuses the naming spinner so a submit does not snap
+  const submitFromComposer = () => {
+    if (sending || busy || naming || compressing || (!input.trim() && !imageAttachments.length)) {
+      return;
+    }
+    setSending(true);
+    sendTimerRef.current = setTimeout(() => {
+      sendTimerRef.current = 0;
+      setSending(false);
+      sendMessageRef.current?.();
+    }, 1000);
+  };
+
+  useEffect(() => () => {
+    if (sendTimerRef.current) {
+      clearTimeout(sendTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const chatId = activeChatId;
@@ -3798,14 +3839,14 @@ const App = () => {
                     ))}
                   </div>
                 )}
-                <textarea value={input} onChange={(event) => setInput(event.target.value)} onPaste={onComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendMessage(); } }} placeholder={goalMode && !goalText ? t("composer.goalPlaceholder") : t("composer.placeholder")} />
+                <textarea value={input} onChange={(event) => setInput(event.target.value)} onPaste={onComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitFromComposer(); } }} placeholder={goalMode && !goalText ? t("composer.goalPlaceholder") : t("composer.placeholder")} />
                 <div className="composer-controls">
                   <input ref={fileInputRef} className="hidden-input" type="file" accept="image/*" multiple onChange={onImageSelected} />
                   <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
                   <div className="composer-spacer" />
                   <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} narrator={Boolean(settings.narrator?.enabled)} mode={settings.mode} open={modelOpen} onToggle={() => setModelOpen(!modelOpen)} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} onNarratorChange={(enabled) => persistSettings({ narrator: { ...(settings.narrator || {}), enabled } })} onModeChange={(mode) => persistSettings({ mode })} />
-                  {naming ? (
-                    <button className="send-button is-naming" disabled title={t("composer.naming")}>
+                  {(naming || sending) ? (
+                    <button className="send-button is-naming" disabled title={naming ? t("composer.naming") : t("composer.sending")}>
                       <LoaderIcon size={17} />
                     </button>
                   ) : busy ? (
@@ -3813,7 +3854,7 @@ const App = () => {
                       <Square size={15} />
                     </button>
                   ) : (
-                    <button className="send-button" onClick={sendMessage} disabled={compressing || (!input.trim() && !imageAttachments.length)}>
+                    <button className="send-button" onClick={submitFromComposer} disabled={compressing || (!input.trim() && !imageAttachments.length)}>
                       <ArrowUp size={18} />
                     </button>
                   )}
@@ -5379,6 +5420,18 @@ const TodoPanel = ({ todos, goalMode, goal, goalDone, open }) => (
   </div>
 );
 
+const PolicyCard = ({ policy }) => (
+  <div className="policy-card">
+    <div className="policy-card-head">
+      <ShieldAlertIcon size={16} />
+      <span>{t("policy.title")}</span>
+    </div>
+    <div className="policy-card-body">{t("policy.body")}</div>
+    {Boolean(policy?.message) && <div className="policy-card-detail">{policy.message}</div>}
+    <div className="policy-card-foot">{t("policy.foot")}</div>
+  </div>
+);
+
 const PlanCard = ({ plan, onAccept, accepted }) => {
   const [decided, setDecided] = useState(null);
   if (accepted || decided === "yes") {
@@ -6020,13 +6073,32 @@ const linkifyCitations = (text, sources) => {
   });
 };
 
+const webHost = (url) => {
+  try {
+    return new URL(String(url)).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+};
+
+const searchedLabel = (result, fallbackUrls = []) => {
+  const fromSources = (Array.isArray(result?.sources) ? result.sources : []).map((source) => webHost(source?.url));
+  const hosts = [...new Set([...fromSources, ...fallbackUrls.map(webHost)].filter(Boolean))];
+  if (!hosts.length) {
+    return t("web.searchedWeb");
+  }
+  return hosts.length === 1
+    ? t("web.searchedSite", { site: hosts[0] })
+    : t("web.searchedSites", { site: hosts[0], n: hosts.length - 1 });
+};
+
 const WebSearchStep = ({ tool }) => {
   const result = tool.result || {};
   const query = result.query || tool.args?.query || "";
   const urls = Array.isArray(result.urls) ? result.urls : (Array.isArray(tool.args?.urls) ? tool.args.urls : []);
   const answer = result.answer || "";
   const sources = Array.isArray(result.sources) ? result.sources : [];
-  const label = t("toollabel.webSearch");
+  const label = result.running ? t("toollabel.webSearch") : searchedLabel(result, urls);
   if (result.depth === "basic") {
     if (result.error) {
       return (
@@ -6037,8 +6109,8 @@ const WebSearchStep = ({ tool }) => {
       );
     }
     const line = result.running
-      ? (result.site ? t("web.checkingSite", { site: result.site }) : t("web.searchingFor", { q: query }))
-      : t("web.searchedFor", { q: query });
+      ? (result.site ? t("web.checkingSite", { site: result.site }) : t("web.searchingWeb"))
+      : searchedLabel(result, urls);
     return (
       <div className="tool-step web-search-basic">
         <span className="step-marker"><Globe size={14} /></span>
@@ -6344,6 +6416,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
                       : <Typewriter key={message.id} text={message.content} animate={sawWorkingRef.current} />}
                   </div>))}
           {hasWork && working && !message.liveTool && <NarrationRow />}
+          {Boolean(message.policy) && <PolicyCard policy={message.policy} />}
           {!working && <FileChangesCard message={message} projectPath={projectPath} onUndo={onUndoTurn} onReveal={onReveal} />}
         </div>
         {assistantActions}
@@ -6357,6 +6430,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
         {Boolean((message.content || "").trim()) && <div className="message-text markdown"><MarkdownMessage content={message.content} /></div>}
         {planTool && <PlanCard plan={planTool.result.plan} onAccept={onAcceptPlan} accepted={message.planAccepted} />}
         {Boolean(message.tools?.length) && <ToolTimeline tools={message.tools} />}
+        {Boolean(message.policy) && <PolicyCard policy={message.policy} />}
       </div>
       {assistantActions}
     </div>
