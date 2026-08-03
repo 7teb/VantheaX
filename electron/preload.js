@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("agentApi", {
   resetMemories: () => ipcRenderer.invoke("memory:reset"),
   generateChatTitle: (payload) => ipcRenderer.invoke("chat:title", payload),
   saveImage: (payload) => ipcRenderer.invoke("image:save", payload),
+  saveTextFile: (payload) => ipcRenderer.invoke("file:save", payload),
   analyzeImage: (payload) => ipcRenderer.invoke("image:analyze", payload),
   loadImage: (name) => ipcRenderer.invoke("image:load", name),
   deleteImages: (names) => ipcRenderer.invoke("image:delete", names),

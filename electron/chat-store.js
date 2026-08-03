@@ -282,6 +282,11 @@ export const createChatStore = ({ directory, legacyFile, backupFile }) => {
         if (message?.attachment?.name) {
           names.add(message.attachment.name);
         }
+        for (const attachment of Array.isArray(message?.attachments) ? message.attachments : []) {
+          if (attachment?.name) {
+            names.add(attachment.name);
+          }
+        }
       }
     }
     return names;

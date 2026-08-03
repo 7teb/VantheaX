@@ -1332,8 +1332,9 @@ textarea {
 .background-task-description {
   margin-top: 2px;
   overflow: hidden;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: 11.5px;
+  font-weight: 500;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1344,8 +1345,9 @@ textarea {
   align-items: center;
   gap: 5px;
   margin-top: 3px;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: 11.5px;
+  font-weight: 520;
   line-height: 1.35;
 }
 
@@ -1382,7 +1384,7 @@ textarea {
 .background-task-id {
   margin-top: 5px;
   overflow: hidden;
-  color: var(--muted);
+  color: var(--text-2);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -1531,9 +1533,10 @@ textarea {
   min-height: 34px;
   padding: 5px 11px;
   border-bottom: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--text-2);
   font-family: var(--font-mono);
   font-size: 10.5px;
+  font-weight: 500;
 }
 
 .agent-transcript-meta > span:nth-child(2) {
@@ -2820,6 +2823,53 @@ textarea {
   line-height: 0;
 }
 
+.composer-file,
+.message-file {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 230px;
+  height: 62px;
+  padding: 0 14px 0 12px;
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.composer-file-icon {
+  flex: none;
+  color: var(--muted);
+}
+
+.composer-file-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.composer-file-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-file-size {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .composer-thumb img {
   display: block;
   width: 62px;
@@ -2848,7 +2898,8 @@ textarea {
   transition: opacity .14s ease, background .14s ease;
 }
 
-.composer-thumb:hover .thumb-remove {
+.composer-thumb:hover .thumb-remove,
+.composer-file:hover .thumb-remove {
   opacity: 1;
 }
 
@@ -4169,6 +4220,21 @@ textarea {
   font-family: var(--font-mono);
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+.cmd-group-meta {
+  flex: none;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-group-meta + .edit-chevron {
+  margin-left: 8px;
 }
 
 .combine-marker {
