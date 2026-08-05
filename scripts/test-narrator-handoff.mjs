@@ -190,6 +190,6 @@ narrationStore.reset("empty");
 
 check(!source.includes("NARRATE_FADE_MS") && !source.includes("s.fading"), "obsolete fade state is removed");
 check(!slice("const applyStreamEvent =", "const pacer =").includes("handoffDelta"), "chat state never applies the handoff after text is visible");
-check(source.includes("createStreamPacer(applyStreamEvent, () => narrationStore.handoffDelta(requestId))"), "the pacer owns the handoff before text application");
+check(source.includes("createStreamPacer(applyStreamEvent, () => turnStore.handoffDelta(requestId))"), "the pacer owns the handoff before text application");
 
 console.log(`${passed} narrator handoff checks passed`);

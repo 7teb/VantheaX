@@ -2233,13 +2233,13 @@ const takeInjections = (requestId) => {
 };
 
 const resolvePermission = (callId, payload) => {
-  const resolver = pendingPermissions.get(callId);
-  if (!resolver) {
+  const pending = pendingPermissions.get(callId);
+  if (!pending) {
     return false;
   }
   pendingPermissions.delete(callId);
   const decision = payload && typeof payload === "object" ? payload : { approved: Boolean(payload) };
-  resolver(decision);
+  pending.resolve(decision);
   return true;
 };
 
@@ -3224,6 +3224,9 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   }
   if (payload.goalMode && payload.goal) {
     lines.push(`GOAL MODE IS ON. You are working toward this goal until it is actually achieved: "${payload.goal}". Keep going until it is implemented and tested. When you believe the goal is fully done, call the submit_result tool, a second model verifies your work and either confirms or sends you back to fix issues. Do not just stop; submit_result is the only way to finish.`);
+  }
+  if (payload.modelHandoff?.to) {
+    lines.push(`MODEL SWITCH: the earlier assistant turns in this conversation were written by a DIFFERENT model (${payload.modelHandoff.from}). You are ${payload.modelHandoff.to} and the user switched to you mid-conversation. Those earlier turns are another model's work, not your own memory: do not claim you wrote them, do not describe their reasoning as yours, and do not assume anything they said they did was actually verified. Treat them as handed-over context. If an earlier turn claims a file was changed or a command was run and it matters now, check the real state yourself instead of trusting it. Only mention the switch if the user asks about it.`);
   }
   if (payload.summary) {
     lines.push(`EARLIER CONVERSATION SUMMARY: the start of this conversation was compacted to save context. The raw earlier messages are gone, but here is a structured summary of what happened before the messages you can see below. Treat it as established history. If you need the exact contents of any file mentioned, re-read it with read_file rather than guessing.\n\n${payload.summary}`);
@@ -4396,10 +4399,10 @@ const runDelegatedAgentTask = async ({
               pendingPermissions.delete(permissionId);
               resolve({ approved: false });
             };
-            pendingPermissions.set(permissionId, (value) => {
+            pendingPermissions.set(permissionId, { requestId: "", resolve: (value) => {
               controller.signal.removeEventListener("abort", onAbort);
               resolve(value);
-            });
+            } });
             controller.signal.addEventListener("abort", onAbort, { once: true });
           });
           emitAgentPermission({ type: "resolved", callId: permissionId, agentId: session.id, runId: run.id });
@@ -4869,10 +4872,10 @@ const runAgentStream = async (payload, sender) => {
                 pendingPermissions.delete(call.id);
                 resolve({ approved: false });
               };
-              pendingPermissions.set(call.id, (value) => {
+              pendingPermissions.set(call.id, { requestId: payload.requestId, resolve: (value) => {
                 controller.signal.removeEventListener("abort", onAbort);
                 resolve(value);
-              });
+              } });
               controller.signal.addEventListener("abort", onAbort, { once: true });
             });
             const classifierBlocked = result.classifierBlocked;
@@ -5690,8 +5693,11 @@ ipcMain.handle("agent:cancel", (_, requestId) => {
   if (controller) {
     controller.abort();
   }
-  for (const [callId, resolver] of pendingPermissions) {
-    resolver({ approved: false });
+  for (const [callId, pending] of pendingPermissions) {
+    if (pending.requestId !== requestId) {
+      continue;
+    }
+    pending.resolve({ approved: false });
     pendingPermissions.delete(callId);
   }
   return { ok: Boolean(controller) };

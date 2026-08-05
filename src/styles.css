@@ -935,6 +935,7 @@ textarea {
 }
 
 .tree-chat {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -947,6 +948,28 @@ textarea {
   text-align: left;
   cursor: pointer;
   transition: background .14s ease, color .14s ease;
+}
+
+.tree-chat .chat-dot {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.chat-dot.is-working {
+  background: #34d399;
+}
+
+.chat-dot.is-done {
+  background: #60a5fa;
+}
+
+.chat-dot.is-stopped {
+  background: #f87171;
 }
 
 .tree-chat:hover {
@@ -1286,8 +1309,8 @@ textarea {
   overflow: hidden;
   border-top-left-radius: 14px;
   border-top-right-radius: 14px;
-  background: var(--surface-2);
-  --region: var(--surface-2);
+  background: var(--surface-chat);
+  --region: var(--surface-chat);
 }
 
 .background-head {
@@ -1298,7 +1321,7 @@ textarea {
   height: 38px;
   padding: 0 8px 0 13px;
   border-bottom: 1px solid var(--line);
-  background: var(--surface-3);
+  background: var(--region);
   -webkit-app-region: no-drag;
 }
 
@@ -2090,7 +2113,7 @@ textarea {
   overflow-y: auto;
   padding: 15px 16px 16px;
   border-radius: 14px;
-  background: var(--surface-3);
+  background: var(--region);
   box-shadow: 0 14px 36px rgba(0, 0, 0, .45);
   opacity: 0;
   transform: translateX(18px) scale(.97);
@@ -2129,7 +2152,7 @@ textarea {
   width: 290px;
   padding: 14px 15px;
   border-radius: 14px;
-  background: var(--surface-3);
+  background: var(--region);
   box-shadow: 0 14px 36px rgba(0, 0, 0, .45);
   opacity: 0;
   transform: translateX(18px) scale(.97);
@@ -2606,6 +2629,7 @@ textarea {
 }
 
 .composer-region {
+  position: relative;
   flex: 0 0 auto;
   width: min(760px, calc(100% - 64px));
 }
@@ -7079,4 +7103,31 @@ summary:hover,
 .chat-menu-trigger,
 .chat-title-folder {
   color: rgba(240, 248, 255, .92);
+}
+
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+  animation: jump-latest-in .16s var(--ease);
+}
+
+.jump-latest:hover {
+  background: var(--surface-2);
+}
+
+@keyframes jump-latest-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }

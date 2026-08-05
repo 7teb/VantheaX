@@ -169,6 +169,7 @@ const STRINGS = {
     "toollabel.grepping": "Searching {x}",
     "grep.matches": "{n} matches",
     "grep.noMatches": "No matches",
+    "composer.jumpLatest": "Jump to latest",
     "grep.capped": "{n}+ matches · capped, narrow query or path",
     "grep.fallback": "invalid regex, searched as literal text",
     "preview.more": "… +{n} more lines",
@@ -598,6 +599,7 @@ const STRINGS = {
     "toollabel.grepping": "Sucht {x}",
     "grep.matches": "{n} Treffer",
     "grep.noMatches": "Keine Treffer",
+    "composer.jumpLatest": "Zum neuesten Beitrag",
     "grep.capped": "{n}+ Treffer · begrenzt, Query oder Pfad eingrenzen",
     "grep.fallback": "Ungültige Regex, wörtlich gesucht",
     "preview.more": "… +{n} weitere Zeilen",
@@ -893,6 +895,7 @@ const api = window.agentApi;
 const chatsKey = "vantheax:chats";
 const activeChatKey = "vantheax:active-chat";
 const BOTTOM_STICK_PX = 100;
+const SCROLL_DOWN_PX = 240;
 
 let stickRaf = 0;
 let isAutoScrolling = false;
@@ -1149,6 +1152,22 @@ const cleanHistory = (messages) => messages
   .filter((message) => message.role === "user" || message.role === "assistant")
   .map((message) => ({ role: message.role, content: (message.content || "") + (message.cancelled ? "\n\n[The user stopped this response before it finished.]" : "") + (message.reverted ? "\n\n[The user reverted the file changes from this turn. Those edits were undone and the files restored to their previous state, so they are no longer applied. Do not assume they still exist; re-read the files if you need their current contents.]" : "") + messageAttachments(message).map((att) => attachmentNoteFor(att)).join("") }))
   .filter((message) => message.content.trim());
+
+const collectModelHandoff = (messages, currentId, currentLabel) => {
+  const prior = messages.filter((message) => message.role === "assistant" && message.model && message.content);
+  if (!prior.length) {
+    return null;
+  }
+  const last = prior[prior.length - 1];
+  if (last.model === currentId) {
+    return null;
+  }
+  const earlier = [...new Set(prior.map((message) => message.modelLabel || message.model))].filter((label) => label !== currentLabel);
+  if (!earlier.length) {
+    return null;
+  }
+  return { from: earlier.join(", "), to: currentLabel };
+};
 
 const collectReadPaths = (messages) => {
   const seen = new Set();
@@ -1659,6 +1678,21 @@ const getAgentNarrationStore = (agentId) => {
   return store;
 };
 
+const turnNarrationStores = new Map();
+const getTurnNarrationStore = (turnId) => {
+  const key = String(turnId || "");
+  let store = turnNarrationStores.get(key);
+  if (!store) {
+    store = createNarrationStore();
+    turnNarrationStores.set(key, store);
+  }
+  return store;
+};
+const peekTurnNarrationStore = (turnId) => turnNarrationStores.get(String(turnId || "")) || narrationStore;
+const releaseTurnNarrationStore = (turnId) => {
+  turnNarrationStores.delete(String(turnId || ""));
+};
+
 const useNarrationLine = (store = narrationStore) => useSyncExternalStore(store.subscribe, store.getLine);
 const useNarrationMode = (store = narrationStore) => useSyncExternalStore(store.subscribe, store.getMode);
 const useLiveLabel = (store = narrationStore) => {
@@ -1670,9 +1704,8 @@ const useLiveLabel = (store = narrationStore) => {
 const contextUsageStore = (() => {
   const subscribers = new Set();
   const cache = new Map();
+  const requests = new Map();
   let activeChatId = "";
-  let activeRequestId = "";
-  let activeRevision = 0;
   let snapshotSequence = 0;
   let current = null;
 
@@ -1697,40 +1730,44 @@ const contextUsageStore = (() => {
         return;
       }
       activeChatId = id;
-      activeRequestId = "";
-      activeRevision = 0;
       snapshotSequence += 1;
       setCurrent(cache.get(id) || null);
     },
     begin(chatId, requestId) {
       const id = String(chatId || "");
+      requests.set(id, { requestId: String(requestId || ""), revision: 0 });
+      snapshotSequence += 1;
       if (id !== activeChatId) {
         activeChatId = id;
         setCurrent(cache.get(id) || null);
       }
-      activeRequestId = String(requestId || "");
-      activeRevision = 0;
-      snapshotSequence += 1;
     },
     end(requestId) {
-      if (activeRequestId && String(requestId || "") === activeRequestId) {
-        activeRequestId = "";
-        snapshotSequence += 1;
+      const id = String(requestId || "");
+      for (const [chatId, entry] of requests) {
+        if (entry.requestId === id) {
+          requests.delete(chatId);
+          snapshotSequence += 1;
+        }
       }
     },
     acceptEvent(event) {
-      if (!event?.usage || String(event.chatId || "") !== activeChatId || String(event.requestId || "") !== activeRequestId) {
+      const chatId = String(event?.chatId || "");
+      const entry = requests.get(chatId);
+      if (!event?.usage || !entry || String(event.requestId || "") !== entry.requestId) {
         return false;
       }
       const revision = Number(event.revision) || 0;
-      if (revision <= activeRevision) {
+      if (revision <= entry.revision) {
         return false;
       }
-      activeRevision = revision;
-      cache.set(activeChatId, event.usage);
-      setCurrent(event.usage);
+      entry.revision = revision;
+      cache.set(chatId, event.usage);
+      if (chatId === activeChatId) {
+        setCurrent(event.usage);
+      }
       if (event.phase === "settled") {
-        activeRequestId = "";
+        requests.delete(chatId);
         snapshotSequence += 1;
       }
       return true;
@@ -1741,15 +1778,18 @@ const contextUsageStore = (() => {
       return { chatId: id, sequence: snapshotSequence };
     },
     acceptSnapshot(ticket, usage) {
-      if (!usage || usage.error || !ticket || ticket.chatId !== activeChatId || ticket.sequence !== snapshotSequence || activeRequestId) {
+      if (!usage || usage.error || !ticket || ticket.chatId !== activeChatId || ticket.sequence !== snapshotSequence || requests.has(ticket.chatId)) {
         return false;
       }
-      cache.set(activeChatId, usage);
+      cache.set(ticket.chatId, usage);
       setCurrent(usage);
       return true;
     },
     getUsage() {
       return current;
+    },
+    getUsageFor(chatId) {
+      return cache.get(String(chatId || "")) || null;
     },
     subscribe(fn) {
       subscribers.add(fn);
@@ -2196,7 +2236,7 @@ const App = () => {
   const browserCloseTimer = useRef(null);
   const backgroundPumpRef = useRef(false);
   const [pendingCompact, setPendingCompact] = useState(null);
-  const [compressing, setCompressing] = useState(false);
+  const [compressingChats, setCompressingChats] = useState(() => new Set());
   const [projectIndex, setProjectIndex] = useState(emptyIndex);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState("");
@@ -2205,12 +2245,15 @@ const App = () => {
   const [selectedContent, setSelectedContent] = useState("");
   const [fileQuery, setFileQuery] = useState("");
   const [chatQuery, setChatQuery] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [streamingChats, setStreamingChats] = useState(() => new Set());
+  const busy = streamingChats.has(activeChatId);
+  const [chatMarks, setChatMarks] = useState(() => new Map());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState(() => { try { return JSON.parse(localStorage.getItem("vantheax:collapsed-projects")) || []; } catch { return []; } });
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [scrolledUp, setScrolledUp] = useState(false);
   const [chatRowMenu, setChatRowMenu] = useState(null);
   const [renamingChatId, setRenamingChatId] = useState("");
   const [renameSource, setRenameSource] = useState("header");
@@ -2231,11 +2274,13 @@ const App = () => {
   const [todos, setTodos] = useState([]);
   const [goalDone, setGoalDone] = useState(false);
   const [permissionQueue, setPermissionQueue] = useState([]);
-  const pendingPermission = permissionQueue[0] || null;
+  const pendingPermission = permissionQueue.find((item) => item.agentId || !item.chatId || item.chatId === activeChatId) || null;
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const [titleMenuOpen, setTitleMenuOpen] = useState(null);
-  const [naming, setNaming] = useState(false);
+  const [namingChats, setNamingChats] = useState(() => new Set());
+  const naming = namingChats.has(activeChatId);
+  const compressing = compressingChats.has(activeChatId);
   const [sending, setSending] = useState(false);
   const [queued, setQueued] = useState([]);
   const [queuedMenu, setQueuedMenu] = useState("");
@@ -2245,12 +2290,11 @@ const App = () => {
   const sendMessageRef = useRef(null);
   const sendTimerRef = useRef(0);
   const chatsLoadedRef = useRef(false);
-  const activeRequestRef = useRef(null);
-  const activeMsgRef = useRef(null);
+  const chatStreamsRef = useRef(new Map());
+  const chatsRef = useRef([]);
   const activeChatIdRef = useRef("");
   const messagesRef = useRef(null);
-  const compactingRef = useRef(false);
-  const pacerRef = useRef(null);
+  const compactingRef = useRef(new Set());
 
   const enqueuePermission = (entry) => {
     if (!entry?.callId) {
@@ -2286,7 +2330,13 @@ const App = () => {
 
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [chats, activeChatId]);
   useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+  useEffect(() => {
     activeChatIdRef.current = activeChatId;
+    if (activeChatId) {
+      markChat(activeChatId, "");
+    }
     backgroundTaskStore.activate(activeChatId);
     setBackgroundWake((value) => value + 1);
   }, [activeChatId]);
@@ -2307,9 +2357,6 @@ const App = () => {
   }), []);
 
   useEffect(() => {
-    if (busy) {
-      return;
-    }
     const msgs = activeChat?.messages || [];
     let found = null;
     let done = false;
@@ -2330,6 +2377,7 @@ const App = () => {
     setGoalDone(done);
   }, [activeChatId]);
   const messages = activeChat?.messages || [];
+  const chatQueued = useMemo(() => queued.filter((item) => (item.chatId || "") === activeChatId), [queued, activeChatId]);
   const turnItems = useMemo(() => buildTurnNavigatorItems(messages), [messages]);
   const lastUserId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -2556,6 +2604,8 @@ const App = () => {
   };
 
   const deleteChat = (chatId) => {
+    cancelChatStream(chatId);
+    setQueued((current) => current.filter((item) => item.chatId !== chatId));
     const names = deletableAttachmentNames(chats, chatId);
     if (names.length) {
       api.deleteImages(names).catch(() => {});
@@ -2563,6 +2613,7 @@ const App = () => {
     api.deleteBackgroundTasks(chatId).catch(() => {});
     api.deleteChat(chatId).catch(() => {});
     backgroundTaskStore.removeChat(chatId);
+    markChat(chatId, "");
     updateChats((current) => current.filter((chat) => chat.id !== chatId));
     if (activeChatId === chatId) {
       setActiveChatId("");
@@ -2602,8 +2653,10 @@ const App = () => {
         </div>
       );
     }
+    const dot = streamingChats.has(chat.id) ? "working" : (chatMarks.get(chat.id) || "");
     return (
       <button key={chat.id} className={chat.id === activeChatId ? "tree-chat active" : "tree-chat"} onClick={() => openChat(chat)}>
+        {dot && <span className={`chat-dot is-${dot}`} />}
         <span>{displayTitle(chat)}</span>
         {chat.pinned && <Pin size={12} className="chat-row-pin" />}
         <small>{formatRelativeTime(chat.updatedAt)}</small>
@@ -2709,25 +2762,89 @@ const App = () => {
     setStatus(t("status.ready"));
   };
 
-  const cancelActiveStream = () => {
-    if (activeRequestRef.current) {
-      api.cancelStream(activeRequestRef.current);
-      narrationStore.reset(activeRequestRef.current);
-      activeRequestRef.current = null;
+  const markChat = (chatId, state) => setChatMarks((current) => {
+    if (!state && !current.has(chatId)) {
+      return current;
     }
-    activeMsgRef.current = null;
-    setPermissionQueue([]);
-    setBusy(false);
+    const next = new Map(current);
+    if (state) {
+      next.set(chatId, state);
+    } else {
+      next.delete(chatId);
+    }
+    return next;
+  });
+
+  const markNaming = (chatId, on) => setNamingChats((current) => {
+    const next = new Set(current);
+    if (on) {
+      next.add(chatId);
+    } else {
+      next.delete(chatId);
+    }
+    return next;
+  });
+
+  const markCompressing = (chatId, on) => setCompressingChats((current) => {
+    const next = new Set(current);
+    if (on) {
+      next.add(chatId);
+    } else {
+      next.delete(chatId);
+    }
+    return next;
+  });
+
+  const registerStream = (chatId, entry) => {
+    chatStreamsRef.current.set(chatId, entry);
+    setStreamingChats(new Set(chatStreamsRef.current.keys()));
+  };
+
+  const unregisterStream = (chatId, requestId) => {
+    const entry = chatStreamsRef.current.get(chatId);
+    if (!entry || entry.requestId !== requestId) {
+      return false;
+    }
+    chatStreamsRef.current.delete(chatId);
+    setStreamingChats(new Set(chatStreamsRef.current.keys()));
+    return true;
+  };
+
+  const cancelChatStream = (chatId) => {
+    const entry = chatStreamsRef.current.get(chatId);
+    if (!entry) {
+      return null;
+    }
+    entry.store?.reset(entry.requestId);
+    entry.pacer?.flush();
+    api.cancelStream(entry.requestId);
+    chatStreamsRef.current.delete(chatId);
+    setStreamingChats(new Set(chatStreamsRef.current.keys()));
+    setPermissionQueue((current) => current.filter((item) => item.agentId || (item.chatId && item.chatId !== chatId)));
+    return entry;
   };
 
   const onMessagesScroll = () => {
+    const el = messagesRef.current;
+    if (!el) {
+      return;
+    }
+    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setScrolledUp(fromBottom > SCROLL_DOWN_PX && el.scrollHeight > el.clientHeight + SCROLL_DOWN_PX);
     if (isAutoScrolling) {
       return;
     }
+    followBottom = fromBottom < BOTTOM_STICK_PX;
+  };
+
+  const jumpToLatest = () => {
     const el = messagesRef.current;
-    if (el) {
-      followBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_STICK_PX;
+    if (!el) {
+      return;
     }
+    followBottom = true;
+    setScrolledUp(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
   const onMessagesWheel = (event) => {
@@ -2747,6 +2864,10 @@ const App = () => {
       stickMessagesToBottom();
     }
   }, [messages]);
+
+  useEffect(() => {
+    setScrolledUp(false);
+  }, [activeChatId]);
 
   useEffect(() => {
     const ANIMATABLE = ".tool-step, .edit-group, .edit-file, .cluster-row, .cmd-group, .tool-card, .worklog";
@@ -2783,7 +2904,6 @@ const App = () => {
   }, [resendText, busy]);
 
   const newChat = async () => {
-    cancelActiveStream();
     if (activeChat?.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
@@ -2792,6 +2912,7 @@ const App = () => {
     setTitleAnim(null);
     setInput("");
     setImageAttachments([]);
+    setFileAttachments([]);
     setGoalText("");
     setTodos([]);
     setGoalDone(false);
@@ -2863,7 +2984,6 @@ const App = () => {
   }, [chats, activeChatId, projectPath]);
 
   const openChat = async (chat) => {
-    cancelActiveStream();
     if (activeChat?.id !== chat.id && activeChat?.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
@@ -2874,17 +2994,16 @@ const App = () => {
     followBottom = true;
     setChats((current) => current.map((item) => {
       if (item.id === loaded.id) {
-        return loaded;
+        // a streaming chat is freshest in state; only swap in what we just read from disk
+        return item.messagesLoaded === false ? loaded : item;
       }
-      if (item.id === activeChat?.id && item.messagesLoaded !== false) {
+      if (item.id === activeChat?.id && item.messagesLoaded !== false && !chatStreamsRef.current.has(item.id)) {
         return unloadStoredChat(item);
       }
       return item;
     }));
     setActiveChatId(loaded.id);
     setSearchOpen(false);
-    setTodos([]);
-    setGoalDone(false);
     if (normPath(loaded.projectPath) !== normPath(projectPath)) {
       if (loaded.projectPath) {
         setProjectPath(loaded.projectPath);
@@ -2913,6 +3032,7 @@ const App = () => {
     setTitleAnim(null);
     setInput("");
     setImageAttachments([]);
+    setFileAttachments([]);
     setEditingMessageId("");
     setTodos([]);
     setGoalDone(false);
@@ -2966,6 +3086,7 @@ const App = () => {
       message,
       summary: chat?.summary || "",
       history: cleanHistory(effective),
+      modelHandoff: collectModelHandoff(effective, settings.model, currentModel?.label || settings.model),
       readPaths: collectReadPaths(effective),
     };
   };
@@ -3004,7 +3125,7 @@ const App = () => {
   const runContextCompaction = async (chatId) => {
     setRightPanel("");
     const chat = chatId ? (chats.find((c) => c.id === chatId) || null) : activeChat;
-    if (!chat || compactingRef.current) {
+    if (!chat || compactingRef.current.has(chat.id)) {
       return;
     }
     const msgs = chat.messages || [];
@@ -3012,14 +3133,14 @@ const App = () => {
     if (rawCutoffIndex(msgs, KEEP_RAW_TURNS) <= start) {
       return;
     }
-    compactingRef.current = true;
-    setCompressing(true);
+    compactingRef.current.add(chat.id);
+    markCompressing(chat.id, true);
     try {
       const result = await compactChatNow(chat, msgs, start);
       await requestContextSnapshot(result.changed ? { ...chat, summary: result.summary, summaryCount: result.summaryCount } : chat);
     } finally {
-      setCompressing(false);
-      compactingRef.current = false;
+      markCompressing(chat.id, false);
+      compactingRef.current.delete(chat.id);
     }
   };
 
@@ -3223,7 +3344,7 @@ const App = () => {
 
   useEffect(() => {
     const refresh = () => {
-      if (!activeRequestRef.current) {
+      if (!chatStreamsRef.current.has(activeChatIdRef.current)) {
         requestContextSnapshot(activeChat);
       }
     };
@@ -3232,12 +3353,12 @@ const App = () => {
   }, [activeChatId, projectPath, settings.model, settings.effort, settings.mode, planMode, goalMode, goalText]);
 
   useEffect(() => {
-    if (!busy && pendingCompact) {
+    if (pendingCompact && !streamingChats.has(pendingCompact)) {
       const id = pendingCompact;
       setPendingCompact(null);
       runContextCompaction(id);
     }
-  }, [busy, pendingCompact]);
+  }, [streamingChats, pendingCompact]);
 
   const openFile = async (file) => {
     setSelectedFile(file);
@@ -3321,23 +3442,36 @@ const App = () => {
     const text = (typeof overrideText === "string" ? overrideText : input).trim();
     const backgroundTask = overrides.backgroundTask || null;
     const isBackgroundContinuation = Boolean(backgroundTask);
+    // staged composer attachments only ride along on a direct composer send, not on queued/resent text
+    const fromComposer = !isBackgroundContinuation && overrideText == null;
     const effectivePlanMode = overrides.planMode !== undefined ? overrides.planMode : planMode;
     const effectiveGoal = goalMode ? (goalText.trim() || (isBackgroundContinuation ? "" : text)) : "";
     if (!isBackgroundContinuation && goalMode && !goalText.trim() && text) {
       setGoalText(text);
     }
-    if ((!text && !imageAttachments.length && !fileAttachments.length) || busy || naming || compactingRef.current || (isBackgroundContinuation && backgroundTask.chatId !== activeChatIdRef.current)) {
+    const targetStreaming = activeChat ? chatStreamsRef.current.has(activeChat.id) : false;
+    if ((!text && !(fromComposer && (imageAttachments.length || fileAttachments.length))) || targetStreaming || naming || compactingRef.current.has(activeChat?.id || "") || (isBackgroundContinuation && backgroundTask.chatId !== activeChatIdRef.current)) {
       return false;
     }
-    const attachments = isBackgroundContinuation ? [] : imageAttachments;
-    const documents = isBackgroundContinuation ? [] : fileAttachments;
-    if (!isBackgroundContinuation) {
+    const chat = activeChat || makeChat(projectPath);
+    const requestId = crypto.randomUUID();
+    const assistantId = crypto.randomUUID();
+    const turnStore = getTurnNarrationStore(assistantId);
+    registerStream(chat.id, { requestId, assistantId, pacer: null, store: turnStore });
+    const stillActiveStream = () => chatStreamsRef.current.get(chat.id)?.requestId === requestId;
+    // a fresh chat must be active before the first await, else naming/busy guard nothing while it runs
+    if (!activeChat) {
+      setActiveChatId(chat.id);
+      updateChats((current) => current.some((item) => item.id === chat.id) ? current : [chat, ...current]);
+    }
+    const attachments = fromComposer ? imageAttachments : [];
+    const documents = fromComposer ? fileAttachments : [];
+    if (fromComposer) {
       setImageAttachments([]);
       setFileAttachments([]);
     }
     let savedFiles = [];
     if (documents.length) {
-      setBusy(true);
       savedFiles = (await Promise.all(documents.map(async (att) => {
         try {
           const saved = await api.saveTextFile({ name: att.name, content: att.content });
@@ -3350,7 +3484,6 @@ const App = () => {
     }
     let savedImages = [];
     if (attachments.length) {
-      setBusy(true);
       savedImages = (await Promise.all(attachments.map(async (att) => {
         try {
           const saved = await api.saveImage({ dataUrl: att.dataUrl, type: att.type });
@@ -3362,13 +3495,15 @@ const App = () => {
         return null;
       }))).filter(Boolean);
     }
+    if (!stillActiveStream()) {
+      releaseTurnNarrationStore(assistantId);
+      return false;
+    }
     if (!isBackgroundContinuation) {
       setTodos([]);
       setGoalDone(false);
     }
-    const chat = activeChat || makeChat(projectPath);
     followBottom = true;
-    const assistantId = crypto.randomUUID();
     const userMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -3379,7 +3514,7 @@ const App = () => {
       createdAt: new Date().toISOString(),
       hidden: isBackgroundContinuation,
     };
-    const assistantDraft = { id: assistantId, role: "assistant", content: "", tools: [], segments: [], startedAt: Date.now(), done: false, createdAt: new Date().toISOString(), backgroundTaskId: backgroundTask?.id || "" };
+    const assistantDraft = { id: assistantId, role: "assistant", content: "", tools: [], segments: [], startedAt: Date.now(), done: false, createdAt: new Date().toISOString(), model: settings.model, modelLabel: currentModel?.label || settings.model, backgroundTaskId: backgroundTask?.id || "" };
     const previousMessages = chat.messages || [];
     const nextMessages = [...previousMessages, ...(isBackgroundContinuation ? [] : [userMessage]), assistantDraft];
     const needsTitle = !isBackgroundContinuation && chat.title === "New chat";
@@ -3388,18 +3523,18 @@ const App = () => {
     }
     let nextTitle = chat.title;
     if (needsTitle) {
-      setNaming(true);
+      markNaming(chat.id, true);
       try {
         nextTitle = await resolveChatTitle(userMessage.content);
       } finally {
-        setNaming(false);
+        markNaming(chat.id, false);
       }
     }
     const workspaceName = projectPath ? "" : (chat.workspaceName || `${(chat.createdAt || new Date().toISOString()).slice(0, 10)} ${slugForFolder(nextTitle)} ${String(chat.id).slice(0, 4)}`);
-    setBusy(true);
-    const requestId = crypto.randomUUID();
-    activeRequestRef.current = requestId;
-    activeMsgRef.current = { chatId: chat.id, assistantId };
+    if (!stillActiveStream()) {
+      releaseTurnNarrationStore(assistantId);
+      return false;
+    }
     contextUsageStore.begin(chat.id, requestId);
     setActiveChatId(chat.id);
     updateChats((current) => {
@@ -3430,7 +3565,7 @@ const App = () => {
       + savedFiles.map((file) => fileNoteFor(file)).join("");
     let effSummary = chat.summary || "";
     let effStart = chat.summaryCount || 0;
-    const currentUsage = contextUsageStore.getUsage();
+    const currentUsage = contextUsageStore.getUsageFor(chat.id);
     const ctxBudget = currentUsage?.budget || 512000;
     const projected = (currentUsage?.total || 0) + estTokens(outgoing);
     if (!currentUsage || projected >= 0.85 * ctxBudget) {
@@ -3450,24 +3585,25 @@ const App = () => {
           history: cleanHistory(previousMessages.slice(effStart)),
           readPaths: collectReadPaths(previousMessages.slice(effStart)),
         });
-        if (usage && usage.budget && usage.total >= COMPACT_THRESHOLD * usage.budget && !compactingRef.current) {
-          compactingRef.current = true;
-          setCompressing(true);
+        if (usage && usage.budget && usage.total >= COMPACT_THRESHOLD * usage.budget && !compactingRef.current.has(chat.id)) {
+          compactingRef.current.add(chat.id);
+          markCompressing(chat.id, true);
           try {
             const res = await compactChatNow(chat, previousMessages, effStart);
             effSummary = res.summary;
             effStart = res.summaryCount;
           } finally {
-            setCompressing(false);
-            compactingRef.current = false;
+            markCompressing(chat.id, false);
+            compactingRef.current.delete(chat.id);
           }
         }
       } catch {}
     }
-    if (activeRequestRef.current !== requestId) {
+    if (!stillActiveStream()) {
       contextUsageStore.end(requestId);
+      releaseTurnNarrationStore(assistantId);
       requestContextSnapshot(activeChat);
-      return;
+      return false;
     }
     const steeredApplied = [];
     const applyStreamEvent = (event) => {
@@ -3487,7 +3623,7 @@ const App = () => {
         }), updatedAt: new Date().toISOString() } : item));
       }
       if (event.type === "steer") {
-        steeredApplied.push({ id: event.steerId, text: event.text });
+        steeredApplied.push({ id: event.steerId, text: event.text, chatId: chat.id });
         setQueued((current) => current.filter((item) => item.id !== event.steerId));
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
           message.id === assistantId ? { ...message, segments: [...(message.segments || []), { type: "steer", text: event.text }] } : message
@@ -3499,28 +3635,30 @@ const App = () => {
         ), updatedAt: new Date().toISOString() } : item));
       }
       if (event.type === "tool_progress") {
-        narrationStore.suppress(requestId);
+        turnStore.suppress(requestId);
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
           message.id === assistantId ? { ...message, liveTool: { name: event.name, path: event.path, lines: event.lines } } : message
         ) } : item));
       }
       if (event.type === "tool") {
-        narrationStore.applyTool(requestId, event.tool?.id);
+        turnStore.applyTool(requestId, event.tool?.id);
         // continue_thinking only flips the live label to "Extended thinking"; it renders no step and adds no segment
         if (event.hidden) {
           if (event.tool?.result?.extendedThinking && !event.tool.result.exhausted) {
-            narrationStore.setExtended(requestId, true);
+            turnStore.setExtended(requestId, true);
             updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
               message.id === assistantId ? { ...message, extendedThinking: true } : message
             ) } : item));
           }
           return;
         }
-        if (event.tool?.name === "update_todos" && Array.isArray(event.tool.result?.todos)) {
-          setTodos(event.tool.result.todos);
-        }
-        if (event.tool?.name === "verify_goal" && event.tool.result?.verifier?.done) {
-          setGoalDone(true);
+        if (activeChatIdRef.current === chat.id) {
+          if (event.tool?.name === "update_todos" && Array.isArray(event.tool.result?.todos)) {
+            setTodos(event.tool.result.todos);
+          }
+          if (event.tool?.name === "verify_goal" && event.tool.result?.verifier?.done) {
+            setGoalDone(true);
+          }
         }
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
           if (message.id !== assistantId) {
@@ -3539,15 +3677,18 @@ const App = () => {
           return { ...message, tools, segments, liveTool: null };
         }), updatedAt: new Date().toISOString() } : item));
         if (event.tool?.result?.permissionRequired) {
-          enqueuePermission({ callId: event.tool.id, tool: event.tool });
+          enqueuePermission({ callId: event.tool.id, tool: event.tool, chatId: chat.id });
         } else if (event.tool?.id) {
           removePermission(event.tool.id);
         }
       }
     };
-    const pacer = createStreamPacer(applyStreamEvent, () => narrationStore.handoffDelta(requestId));
-    pacerRef.current = pacer;
-    narrationStore.begin(requestId);
+    const pacer = createStreamPacer(applyStreamEvent, () => turnStore.handoffDelta(requestId));
+    const streamEntry = chatStreamsRef.current.get(chat.id);
+    if (streamEntry && streamEntry.requestId === requestId) {
+      streamEntry.pacer = pacer;
+    }
+    turnStore.begin(requestId);
     let sawTool = false;
     let turnSucceeded = false;
     try {
@@ -3568,6 +3709,7 @@ const App = () => {
         visualContext: [...collectImageAnalyses(previousMessages.slice(effStart)), ...savedImages.map((img, i) => imageAnalyses[i] ? `image "${img.name}": ${imageAnalyses[i]}` : "").filter(Boolean)],
         summary: effSummary,
         history: cleanHistory(previousMessages.slice(effStart)),
+        modelHandoff: collectModelHandoff(previousMessages.slice(effStart), settings.model, currentModel?.label || settings.model),
         readPaths: collectReadPaths(previousMessages.slice(effStart)),
         fileAttachments: collectFileAttachments([...previousMessages.slice(effStart), userMessage]),
       }, (event) => {
@@ -3576,7 +3718,7 @@ const App = () => {
           return;
         }
         if (event.type === "narration") {
-          narrationStore.enqueue(requestId, event);
+          turnStore.enqueue(requestId, event);
           return;
         }
         if (event.type === "tool" && !event.hidden && !event.tool?.result?.plan) {
@@ -3610,17 +3752,23 @@ const App = () => {
           .map((m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${String(m.content || "").slice(0, 4000)}`).join("\n\n");
         api.extractMemories({ chatId: chat.id, conversation: convo, usedTools }).catch(() => {});
       }
-      if (activeRequestRef.current === requestId) {
+      if (stillActiveStream() && activeChatIdRef.current === chat.id) {
         setStatus(t("status.ready"));
+      }
+      if (activeChatIdRef.current !== chat.id) {
+        markChat(chat.id, stillActiveStream() ? "done" : "stopped");
       }
       turnSucceeded = true;
     } catch (error) {
-      narrationStore.reset(requestId);
+      turnStore.reset(requestId);
       pacer.flush();
+      if (activeChatIdRef.current !== chat.id) {
+        markChat(chat.id, "stopped");
+      }
       if (steeredApplied.length) {
         setQueued((current) => [...steeredApplied.filter((entry) => !current.some((item) => item.id === entry.id)), ...current]);
       }
-      if (activeRequestRef.current === requestId) {
+      if (stillActiveStream()) {
         const clean = String(error?.message || "").replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, "") || "The turn failed.";
         const failedMessages = isBackgroundContinuation
           ? nextMessages.filter((message) => message.id !== assistantId)
@@ -3628,19 +3776,24 @@ const App = () => {
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: failedMessages, updatedAt: new Date().toISOString() } : item));
         contextUsageStore.end(requestId);
         requestContextSnapshot({ ...chat, messages: failedMessages });
-        setStatus(t("status.failed"));
+        if (activeChatIdRef.current === chat.id) {
+          setStatus(t("status.failed"));
+        }
       }
     } finally {
-      narrationStore.reset(requestId);
+      turnStore.reset(requestId);
       pacer.flush();
-      if (pacerRef.current === pacer) {
-        pacerRef.current = null;
-      }
-      if (activeRequestRef.current === requestId) {
-        setBusy(false);
-        activeRequestRef.current = null;
-        activeMsgRef.current = null;
-      }
+      unregisterStream(chat.id, requestId);
+      releaseTurnNarrationStore(assistantId);
+      setTimeout(() => {
+        if (activeChatIdRef.current === chat.id) {
+          return;
+        }
+        const finished = chatsRef.current.find((item) => item.id === chat.id);
+        if (finished && finished.messagesLoaded !== false) {
+          api.saveChat(finished).catch(() => {});
+        }
+      }, 150);
     }
     return turnSucceeded;
   };
@@ -3648,7 +3801,7 @@ const App = () => {
   sendMessageRef.current = sendMessage;
 
   const queueMessage = (text) => {
-    setQueued((current) => [...current, { id: crypto.randomUUID(), text }]);
+    setQueued((current) => [...current, { id: crypto.randomUUID(), text, chatId: activeChatIdRef.current }]);
     setInput("");
   };
 
@@ -3658,7 +3811,7 @@ const App = () => {
       return;
     }
     setQueued((current) => current.map((item) => item.id === entry.id ? { ...item, steering: true } : item));
-    const requestId = activeRequestRef.current;
+    const requestId = chatStreamsRef.current.get(entry.chatId || activeChatIdRef.current)?.requestId || "";
     const delivered = requestId ? await api.injectMessage(requestId, entry.text, entry.id).catch(() => null) : null;
     if (!delivered?.ok) {
       setQueued((current) => current.map((item) => item.id === entry.id ? { ...item, steering: false } : item));
@@ -3687,27 +3840,33 @@ const App = () => {
     }, 1000);
   };
 
+  // pending 1s send is bound to the chat it was submitted in; a chat switch cancels it instead of misrouting
   useEffect(() => () => {
     if (sendTimerRef.current) {
       clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = 0;
+      setSending(false);
     }
-  }, []);
+  }, [activeChatId]);
 
   useEffect(() => {
-    if (busy || naming || sending || compressing || !queued.length || queuePumpRef.current) {
+    if (busy || naming || sending || compressing || queuePumpRef.current) {
+      return;
+    }
+    const next = queued.find((item) => (item.chatId || "") === activeChatId);
+    if (!next) {
       return;
     }
     queuePumpRef.current = true;
-    const next = queued[0];
     setQueued((current) => current.filter((item) => item.id !== next.id));
     Promise.resolve(sendMessageRef.current?.(next.text)).finally(() => {
       queuePumpRef.current = false;
     });
-  }, [busy, naming, sending, compressing, queued]);
+  }, [busy, naming, sending, compressing, queued, activeChatId]);
 
   useEffect(() => {
     const chatId = activeChatId;
-    if (!chatId || busy || naming || compactingRef.current || backgroundPumpRef.current) {
+    if (!chatId || busy || naming || compactingRef.current.has(chatId) || backgroundPumpRef.current) {
       return;
     }
     backgroundPumpRef.current = true;
@@ -3719,7 +3878,7 @@ const App = () => {
         if (!task) {
           return;
         }
-        if (activeChatIdRef.current !== chatId || activeRequestRef.current) {
+        if (activeChatIdRef.current !== chatId || chatStreamsRef.current.has(chatId)) {
           await api.settleBackgroundNotification(task.id, false);
           return;
         }
@@ -3740,21 +3899,13 @@ const App = () => {
   }, [activeChatId, busy, naming, backgroundWake]);
 
   const stopGeneration = () => {
-    const active = activeMsgRef.current;
-    const stoppedId = activeRequestRef.current;
-    narrationStore.reset(stoppedId);
-    pacerRef.current?.flush();
-    if (stoppedId) {
-      api.cancelStream(stoppedId);
+    const chatId = activeChatIdRef.current;
+    const entry = cancelChatStream(chatId);
+    if (!entry) {
+      return;
     }
-    if (active) {
-      updateChats((current) => current.map((item) => item.id === active.chatId ? { ...item, messages: item.messages.map((message) => message.id === active.assistantId ? { ...message, done: true, cancelled: true, workMs: message.workMs || Math.max(1, Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() } : item));
-      setStatus(t("status.stopped"));
-    }
-    activeRequestRef.current = null;
-    activeMsgRef.current = null;
-    setPermissionQueue((current) => current.filter((item) => item.agentId));
-    setBusy(false);
+    updateChats((current) => current.map((item) => item.id === chatId ? { ...item, messages: item.messages.map((message) => message.id === entry.assistantId ? { ...message, done: true, cancelled: true, workMs: message.workMs || Math.max(1, Date.now() - (message.startedAt || Date.now())) } : message), updatedAt: new Date().toISOString() } : item));
+    setStatus(t("status.stopped"));
   };
 
   const acceptPlan = () => {
@@ -4021,8 +4172,13 @@ const App = () => {
             )}
             {compressing && <CompressingOverlay />}
             {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
+            {messages.length > 0 && scrolledUp && (
+              <button type="button" className="jump-latest" onClick={jumpToLatest} title={t("composer.jumpLatest")}>
+                <ChevronDown size={18} />
+              </button>
+            )}
             <div className="composer-stack">
-              {queued.map((entry) => (
+              {chatQueued.map((entry) => (
                 <div className={entry.steering ? "queued-message is-steering" : "queued-message"} key={entry.id}>
                   <ListEndIcon size={16} className="queued-icon" />
                   <span className="queued-text">{entry.text}</span>
@@ -5892,6 +6048,15 @@ const groupWorkSegments = (segments) => {
       blocks.push({ kind: "todos", tool });
       continue;
     }
+    if (tool?.name === "web_search") {
+      const existing = blocks.find((block) => block.kind === "websearch");
+      if (existing) {
+        existing.tools.push(tool);
+      } else {
+        blocks.push({ kind: "websearch", tools: [tool] });
+      }
+      continue;
+    }
     const kind = clusterKind(tool);
     if (kind) {
       const last = blocks[blocks.length - 1];
@@ -6409,12 +6574,38 @@ const searchedLabel = (result, fallbackUrls = []) => {
     : t("web.searchedSites", { n: hosts.length });
 };
 
-const WebSearchStep = ({ tool }) => {
+const WebSearchBody = ({ tool }) => {
   const result = tool.result || {};
   const query = result.query || tool.args?.query || "";
   const urls = Array.isArray(result.urls) ? result.urls : (Array.isArray(tool.args?.urls) ? tool.args.urls : []);
   const answer = result.answer || "";
   const sources = Array.isArray(result.sources) ? result.sources : [];
+  return (
+    <>
+      {Boolean(query) && <div className="web-query">{query}</div>}
+      {urls.length > 0 && <div className="web-query-url">{urls.join("  ")}</div>}
+      <div className="web-sep" />
+      {result.error
+        ? <div className="tool-warning">{result.error}</div>
+        : <div className="web-answer markdown"><MarkdownMessage content={linkifyCitations(answer, sources)} /></div>}
+      {sources.length > 0 && (
+        <div className="web-sources">
+          <div className="web-sources-title">{t("web.sources")}</div>
+          {sources.map((source, index) => (
+            <button key={index} type="button" className="web-source" onClick={() => api.openExternal(source.url)}>
+              <Globe size={13} />
+              <span>{source.title || source.url}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+};
+
+const WebSearchStep = ({ tool }) => {
+  const result = tool.result || {};
+  const urls = Array.isArray(result.urls) ? result.urls : (Array.isArray(tool.args?.urls) ? tool.args.urls : []);
   const label = result.running ? t("toollabel.webSearch") : searchedLabel(result, urls);
   if (result.depth === "basic") {
     if (result.error) {
@@ -6456,23 +6647,56 @@ const WebSearchStep = ({ tool }) => {
         <ChevronRight size={13} className="edit-chevron" />
       </summary>
       <div className="step-body web-search-body">
-        {Boolean(query) && <div className="web-query">{query}</div>}
-        {urls.length > 0 && <div className="web-query-url">{urls.join("  ")}</div>}
-        <div className="web-sep" />
-        {result.error
-          ? <div className="tool-warning">{result.error}</div>
-          : <div className="web-answer markdown"><MarkdownMessage content={linkifyCitations(answer, sources)} /></div>}
-        {sources.length > 0 && (
-          <div className="web-sources">
-            <div className="web-sources-title">{t("web.sources")}</div>
-            {sources.map((source, index) => (
-              <button key={index} type="button" className="web-source" onClick={() => api.openExternal(source.url)}>
-                <Globe size={13} />
-                <span>{source.title || source.url}</span>
-              </button>
-            ))}
+        <WebSearchBody tool={tool} />
+      </div>
+    </details>
+  );
+};
+
+const WebSearchGroup = ({ tools }) => {
+  if (tools.length === 1) {
+    return <WebSearchStep tool={tools[0]} />;
+  }
+  const running = tools.some((tool) => tool.result?.running);
+  const done = tools.filter((tool) => !tool.result?.running);
+  const hosts = new Set();
+  for (const tool of done) {
+    const result = tool.result || {};
+    for (const source of Array.isArray(result.sources) ? result.sources : []) {
+      const host = webHost(source?.url);
+      if (host) {
+        hosts.add(host);
+      }
+    }
+    const urls = Array.isArray(result.urls) ? result.urls : (Array.isArray(tool.args?.urls) ? tool.args.urls : []);
+    for (const url of urls) {
+      const host = webHost(url);
+      if (host) {
+        hosts.add(host);
+      }
+    }
+  }
+  const label = running
+    ? t("toollabel.webSearch")
+    : (hosts.size === 0
+      ? t("web.searchedWeb")
+      : (hosts.size === 1 ? t("web.searchedSite", { site: [...hosts][0] }) : t("web.searchedSites", { n: hosts.size })));
+  return (
+    <details className="tool-step web-search">
+      <summary>
+        <span className="step-marker"><GlobeCheckIcon size={14} /></span>
+        {running
+          ? <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
+          : <span className="step-label">{label}</span>}
+        {running ? <LoaderIcon size={13} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
+      </summary>
+      <div className="step-body web-search-body">
+        {done.map((tool, index) => (
+          <div key={tool.id || index}>
+            {index > 0 && <div className="web-sep" />}
+            <WebSearchBody tool={tool} />
           </div>
-        )}
+        ))}
       </div>
     </details>
   );
@@ -6546,8 +6770,8 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
           if (block.kind === "todos") {
             return <TodoStep tool={block.tool} key={key} />;
           }
-          if (block.tool?.name === "web_search") {
-            return <WebSearchStep tool={block.tool} key={key} />;
+          if (block.kind === "websearch") {
+            return <WebSearchGroup tools={block.tools} key={key} />;
           }
           return <ToolStep tool={block.tool} key={key} />;
         })}
@@ -6740,7 +6964,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
                 ? (!planSeg && (
                     <>
                       {extendedTurn && Boolean((message.content || "").trim()) && <div className="message-text markdown"><MarkdownMessage content={message.content} /></div>}
-                      <Thinking />
+                      <Thinking store={peekTurnNarrationStore(message.id)} />
                     </>
                   ))
                 : (Boolean((message.content || "").trim()) && <div className="message-text markdown">
@@ -6748,7 +6972,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
                       ? <MarkdownMessage content={message.content} />
                       : <Typewriter key={message.id} text={message.content} animate={sawWorkingRef.current} />}
                   </div>))}
-          {hasWork && working && !message.liveTool && <NarrationRow />}
+          {hasWork && working && !message.liveTool && <NarrationRow store={peekTurnNarrationStore(message.id)} />}
           {Boolean(message.policy) && <PolicyCard policy={message.policy} />}
           {!working && <FileChangesCard message={message} projectPath={projectPath} onUndo={onUndoTurn} onReveal={onReveal} />}
         </div>
