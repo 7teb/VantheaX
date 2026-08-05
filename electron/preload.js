@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("agentApi", {
   saveTextFile: (payload) => ipcRenderer.invoke("file:save", payload),
   analyzeImage: (payload) => ipcRenderer.invoke("image:analyze", payload),
   loadImage: (name) => ipcRenderer.invoke("image:load", name),
+  exportImage: (name) => ipcRenderer.invoke("image:export", name),
   deleteImages: (names) => ipcRenderer.invoke("image:delete", names),
   chooseProject: () => ipcRenderer.invoke("project:choose"),
   createProject: () => ipcRenderer.invoke("project:create"),

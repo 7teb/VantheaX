@@ -17,6 +17,7 @@
     "directories": {
       "output": "outputs/electron"
     },
+    "electronDist": "outputs/electron-dist",
     "npmRebuild": false,
     "files": [
       "dist/**/*",
