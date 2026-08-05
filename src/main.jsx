@@ -74,6 +74,11 @@ const STRINGS = {
     "composer.stop": "Stop",
     "composer.naming": "Naming this chat",
     "composer.sending": "Sending",
+    "queued.steer": "Steer",
+    "queued.steerHint": "Send now, the agent keeps working",
+    "queued.discard": "Discard",
+    "queued.more": "More",
+    "queued.edit": "Edit",
     "plus.add": "Add",
     "plus.attach": "Add photos and text files",
     "plus.planMode": "Plan mode",
@@ -164,6 +169,8 @@ const STRINGS = {
     "toollabel.grepping": "Searching {x}",
     "grep.matches": "{n} matches",
     "grep.noMatches": "No matches",
+    "grep.capped": "{n}+ matches · capped, narrow query or path",
+    "grep.fallback": "invalid regex, searched as literal text",
     "preview.more": "… +{n} more lines",
     "toollabel.writing": "Writing {x}",
     "toollabel.editing": "Editing {x}",
@@ -288,7 +295,7 @@ const STRINGS = {
     "web.searchingWeb": "Searching the web",
     "web.checkingSite": "Searching {site}",
     "web.searchedSite": "Searched {site}",
-    "web.searchedSites": "Searched {site} +{n}",
+    "web.searchedSites": "Searched {n} sites",
     "web.searchedWeb": "Searched the web",
     "panels.title": "Panels",
     "panels.openRoot": "Open the project folder",
@@ -496,6 +503,11 @@ const STRINGS = {
     "composer.stop": "Stopp",
     "composer.naming": "Chat wird benannt",
     "composer.sending": "Wird gesendet",
+    "queued.steer": "Steuern",
+    "queued.steerHint": "Sofort senden, der Agent arbeitet weiter",
+    "queued.discard": "Verwerfen",
+    "queued.more": "Mehr",
+    "queued.edit": "Bearbeiten",
     "plus.add": "Hinzufügen",
     "plus.attach": "Fotos und Textdateien hinzufügen",
     "plus.planMode": "Planmodus",
@@ -586,6 +598,8 @@ const STRINGS = {
     "toollabel.grepping": "Sucht {x}",
     "grep.matches": "{n} Treffer",
     "grep.noMatches": "Keine Treffer",
+    "grep.capped": "{n}+ Treffer · begrenzt, Query oder Pfad eingrenzen",
+    "grep.fallback": "Ungültige Regex, wörtlich gesucht",
     "preview.more": "… +{n} weitere Zeilen",
     "toollabel.writing": "Schreibt {x}",
     "toollabel.editing": "Bearbeitet {x}",
@@ -710,7 +724,7 @@ const STRINGS = {
     "web.searchingWeb": "Sucht im Web",
     "web.checkingSite": "{site} wird durchsucht",
     "web.searchedSite": "{site} durchsucht",
-    "web.searchedSites": "{site} +{n} durchsucht",
+    "web.searchedSites": "{n} Websites durchsucht",
     "web.searchedWeb": "Web durchsucht",
     "panels.title": "Panels",
     "panels.openRoot": "Projektordner öffnen",
@@ -2104,7 +2118,7 @@ const MONO_FONTS = [
 ];
 
 const THEME_PRESETS = [
-  { id: "vantheax", label: "VantheaX", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
+  { id: "vantheax", label: "VantheaX", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#0f0f0f", text: "#ededed" },
   { id: "vercel", label: "Vercel", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed" },
   { id: "dracula", label: "Dracula", accent: "#bd93f9", surfaceApp: "#21222c", surfaceSidebar: "#21222c", surfaceChat: "#282a36", text: "#f8f8f2" },
   { id: "nord", label: "Nord", accent: "#88c0d0", surfaceApp: "#2e3440", surfaceSidebar: "#2e3440", surfaceChat: "#2e3440", text: "#eceff4" },
@@ -2120,7 +2134,7 @@ const THEME_PRESETS = [
   { id: "carbon", label: "Carbon", accent: "#78a9ff", surfaceApp: "#161616", surfaceSidebar: "#161616", surfaceChat: "#0b0b0b", text: "#e6e6e6" },
 ];
 
-const DEFAULT_THEME = { preset: "vantheax", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#000000", text: "#ededed", fontUi: "Open Sans", fontMono: "JetBrains Mono", contrast: 19 };
+const DEFAULT_THEME = { preset: "vantheax", accent: "#006efe", surfaceApp: "#0a0a0a", surfaceSidebar: "#0a0a0a", surfaceChat: "#0f0f0f", text: "#ededed", fontUi: "Open Sans", fontMono: "JetBrains Mono", contrast: 19 };
 
 const normalizeTheme = (input) => {
   const next = { ...DEFAULT_THEME, ...(input || {}) };
@@ -2197,7 +2211,9 @@ const App = () => {
   const [modelOpen, setModelOpen] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState(() => { try { return JSON.parse(localStorage.getItem("vantheax:collapsed-projects")) || []; } catch { return []; } });
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [chatRowMenu, setChatRowMenu] = useState(null);
   const [renamingChatId, setRenamingChatId] = useState("");
+  const [renameSource, setRenameSource] = useState("header");
   const [renameValue, setRenameValue] = useState("");
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
@@ -2221,6 +2237,9 @@ const App = () => {
   const [titleMenuOpen, setTitleMenuOpen] = useState(null);
   const [naming, setNaming] = useState(false);
   const [sending, setSending] = useState(false);
+  const [queued, setQueued] = useState([]);
+  const [queuedMenu, setQueuedMenu] = useState("");
+  const queuePumpRef = useRef(false);
   const [titleAnim, setTitleAnim] = useState(null);
   const fileInputRef = useRef(null);
   const sendMessageRef = useRef(null);
@@ -2380,7 +2399,7 @@ const App = () => {
   }, []);
 
   useEffect(() => {
-    if (!plusMenuOpen && !brandMenuOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !rightPanel && titleMenuOpen === null) {
+    if (!plusMenuOpen && !brandMenuOpen && !modelOpen && !projectMenuOpen && !chatMenuOpen && !chatRowMenu && !rightPanel && titleMenuOpen === null) {
       return;
     }
     const onDown = (event) => {
@@ -2405,10 +2424,13 @@ const App = () => {
       if (!event.target.closest(".chat-menu-wrap")) {
         setChatMenuOpen(false);
       }
+      if (!event.target.closest(".chat-row-menu") && !event.target.closest(".chat-row-dots")) {
+        setChatRowMenu(null);
+      }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [plusMenuOpen, brandMenuOpen, modelOpen, projectMenuOpen, chatMenuOpen, rightPanel, titleMenuOpen]);
+  }, [plusMenuOpen, brandMenuOpen, modelOpen, projectMenuOpen, chatMenuOpen, chatRowMenu, rightPanel, titleMenuOpen]);
 
   useEffect(() => {
     if (!chatsLoadedRef.current || !activeChat || activeChat.messagesLoaded === false) {
@@ -2553,6 +2575,7 @@ const App = () => {
 
   const startRename = () => {
     setRenameValue(activeChat?.title || "");
+    setRenameSource("header");
     setRenamingChatId(activeChat?.id || "");
     setChatMenuOpen(false);
   };
@@ -2562,6 +2585,45 @@ const App = () => {
       renameChat(renamingChatId, renameValue);
     }
     setRenamingChatId("");
+  };
+
+  const renderTreeChat = (chat) => {
+    if (renamingChatId === chat.id && renameSource === "side") {
+      return (
+        <div key={chat.id} className={chat.id === activeChatId ? "tree-chat active renaming" : "tree-chat renaming"}>
+          <input
+            className="tree-rename-input"
+            value={renameValue}
+            autoFocus
+            onChange={(event) => setRenameValue(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter") { commitRename(); } if (event.key === "Escape") { setRenamingChatId(""); } }}
+            onBlur={commitRename}
+          />
+        </div>
+      );
+    }
+    return (
+      <button key={chat.id} className={chat.id === activeChatId ? "tree-chat active" : "tree-chat"} onClick={() => openChat(chat)}>
+        <span>{displayTitle(chat)}</span>
+        {chat.pinned && <Pin size={12} className="chat-row-pin" />}
+        <small>{formatRelativeTime(chat.updatedAt)}</small>
+        <span
+          className={chatRowMenu?.id === chat.id ? "chat-row-dots is-open" : "chat-row-dots"}
+          title={t("chat.options")}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (chatRowMenu?.id === chat.id) {
+              setChatRowMenu(null);
+              return;
+            }
+            const rect = event.currentTarget.getBoundingClientRect();
+            setChatRowMenu({ id: chat.id, x: rect.right, y: rect.bottom });
+          }}
+        >
+          <MoreHorizontal size={14} />
+        </span>
+      </button>
+    );
   };
 
   const persistSettings = async (next) => {
@@ -3407,6 +3469,7 @@ const App = () => {
       requestContextSnapshot(activeChat);
       return;
     }
+    const steeredApplied = [];
     const applyStreamEvent = (event) => {
       if (event.type === "delta") {
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) => {
@@ -3422,6 +3485,13 @@ const App = () => {
           }
           return { ...message, content: `${message.content || ""}${event.delta}`, segments, liveTool: null };
         }), updatedAt: new Date().toISOString() } : item));
+      }
+      if (event.type === "steer") {
+        steeredApplied.push({ id: event.steerId, text: event.text });
+        setQueued((current) => current.filter((item) => item.id !== event.steerId));
+        updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
+          message.id === assistantId ? { ...message, segments: [...(message.segments || []), { type: "steer", text: event.text }] } : message
+        ), updatedAt: new Date().toISOString() } : item));
       }
       if (event.type === "policy") {
         updateChats((current) => current.map((item) => item.id === chat.id ? { ...item, messages: item.messages.map((message) =>
@@ -3519,6 +3589,10 @@ const App = () => {
       } else {
         await pacer.flushAfterGate();
       }
+      if (Array.isArray(result?.steered) && result.steered.length) {
+        const consumed = new Set(result.steered);
+        setQueued((current) => current.filter((item) => !consumed.has(item.id)));
+      }
       const hasBackgroundOutput = Boolean(String(result?.content || "").trim() || (Array.isArray(result?.tools) && result.tools.length));
       updateChats((current) => current.map((item) => {
         if (item.id !== chat.id) {
@@ -3543,6 +3617,9 @@ const App = () => {
     } catch (error) {
       narrationStore.reset(requestId);
       pacer.flush();
+      if (steeredApplied.length) {
+        setQueued((current) => [...steeredApplied.filter((entry) => !current.some((item) => item.id === entry.id)), ...current]);
+      }
       if (activeRequestRef.current === requestId) {
         const clean = String(error?.message || "").replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, "") || "The turn failed.";
         const failedMessages = isBackgroundContinuation
@@ -3570,7 +3647,35 @@ const App = () => {
 
   sendMessageRef.current = sendMessage;
 
+  const queueMessage = (text) => {
+    setQueued((current) => [...current, { id: crypto.randomUUID(), text }]);
+    setInput("");
+  };
+
+  const steerQueued = async (entry) => {
+    setQueuedMenu("");
+    if (entry.steering) {
+      return;
+    }
+    setQueued((current) => current.map((item) => item.id === entry.id ? { ...item, steering: true } : item));
+    const requestId = activeRequestRef.current;
+    const delivered = requestId ? await api.injectMessage(requestId, entry.text, entry.id).catch(() => null) : null;
+    if (!delivered?.ok) {
+      setQueued((current) => current.map((item) => item.id === entry.id ? { ...item, steering: false } : item));
+    }
+  };
+
+  const editQueued = (entry) => {
+    setQueuedMenu("");
+    setQueued((current) => current.filter((item) => item.id !== entry.id));
+    setInput((current) => (current.trim() ? `${current.trim()}\n${entry.text}` : entry.text));
+  };
+
   const submitFromComposer = () => {
+    if (busy && input.trim()) {
+      queueMessage(input.trim());
+      return;
+    }
     if (sending || busy || naming || compressing || (!input.trim() && !imageAttachments.length && !fileAttachments.length)) {
       return;
     }
@@ -3587,6 +3692,18 @@ const App = () => {
       clearTimeout(sendTimerRef.current);
     }
   }, []);
+
+  useEffect(() => {
+    if (busy || naming || sending || compressing || !queued.length || queuePumpRef.current) {
+      return;
+    }
+    queuePumpRef.current = true;
+    const next = queued[0];
+    setQueued((current) => current.filter((item) => item.id !== next.id));
+    Promise.resolve(sendMessageRef.current?.(next.text)).finally(() => {
+      queuePumpRef.current = false;
+    });
+  }, [busy, naming, sending, compressing, queued]);
 
   useEffect(() => {
     const chatId = activeChatId;
@@ -3769,7 +3886,7 @@ const App = () => {
             <FolderOpen size={17} />
             <span>{t("nav.openProject")}</span>
           </button>
-          <div className="rail-scroll">
+          <div className="rail-scroll" onScroll={() => { if (chatRowMenu) { setChatRowMenu(null); } }}>
           {Boolean(settings.projects?.length) && (
             <>
               <div className="section-label">{t("section.projects")}</div>
@@ -3792,13 +3909,7 @@ const App = () => {
                         <div className="project-chats-inner">
                           {list.length === 0 ? (
                             <div className="project-empty">{t("tree.noChats")}</div>
-                          ) : list.map((chat) => (
-                            <button key={chat.id} className={chat.id === activeChatId ? "tree-chat active" : "tree-chat"} onClick={() => openChat(chat)}>
-                              <span>{displayTitle(chat)}</span>
-                              {chat.pinned && <Pin size={12} className="chat-row-pin" />}
-                              <small>{formatRelativeTime(chat.updatedAt)}</small>
-                            </button>
-                          ))}
+                          ) : list.map(renderTreeChat)}
                         </div>
                       </div>
                     </div>
@@ -3811,17 +3922,24 @@ const App = () => {
             <>
               <div className="section-label">{t("section.noProject")}</div>
               <div className="project-chats-inner project-chats-root">
-                {noProjectChats.map((chat) => (
-                  <button key={chat.id} className={chat.id === activeChatId ? "tree-chat active" : "tree-chat"} onClick={() => openChat(chat)}>
-                    <span>{displayTitle(chat)}</span>
-                    {chat.pinned && <Pin size={12} className="chat-row-pin" />}
-                    <small>{formatRelativeTime(chat.updatedAt)}</small>
-                  </button>
-                ))}
+                {noProjectChats.map(renderTreeChat)}
               </div>
             </>
           )}
           </div>
+          {chatRowMenu && (() => {
+            const menuChat = chats.find((chat) => chat.id === chatRowMenu.id);
+            if (!menuChat) {
+              return null;
+            }
+            return (
+              <div className="chat-menu chat-row-menu" style={{ top: Math.min(chatRowMenu.y + 4, window.innerHeight - 140), left: chatRowMenu.x }}>
+                <button className="chat-menu-row" onClick={() => { setRenameValue(menuChat.title || ""); setRenameSource("side"); setRenamingChatId(menuChat.id); setChatRowMenu(null); }}><PencilLine size={15} /><span>{t("chat.rename")}</span></button>
+                <button className="chat-menu-row" onClick={() => { togglePinChat(menuChat.id); setChatRowMenu(null); }}><Pin size={15} /><span>{menuChat.pinned ? t("chat.unpin") : t("chat.pin")}</span></button>
+                <button className="chat-menu-row danger" onClick={() => { deleteChat(menuChat.id); setChatRowMenu(null); }}><Trash2 size={15} /><span>{t("chat.delete")}</span></button>
+              </div>
+            );
+          })()}
           <button className="rail-settings" onClick={() => setSettingsOpen(true)} title={t("nav.settings")}>
             <Settings size={17} />
             <span>{t("nav.settings")}</span>
@@ -3844,7 +3962,7 @@ const App = () => {
           {messages.length > 0 && (
             <header className="chat-header">
               {activeChat && <Folders className="chat-title-folder" size={18} aria-hidden="true" />}
-              {renamingChatId && renamingChatId === activeChat?.id ? (
+              {renamingChatId && renamingChatId === activeChat?.id && renameSource === "header" ? (
                 <input
                   className="chat-rename-input"
                   value={renameValue}
@@ -3904,6 +4022,29 @@ const App = () => {
             {compressing && <CompressingOverlay />}
             {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
             <div className="composer-stack">
+              {queued.map((entry) => (
+                <div className={entry.steering ? "queued-message is-steering" : "queued-message"} key={entry.id}>
+                  <ListEndIcon size={16} className="queued-icon" />
+                  <span className="queued-text">{entry.text}</span>
+                  <button type="button" className="queued-action queued-steer" onClick={() => steerQueued(entry)} disabled={Boolean(entry.steering)} title={t("queued.steerHint")}>
+                    <CornerDownRightIcon size={15} />
+                    <span>{t("queued.steer")}</span>
+                  </button>
+                  <button type="button" className="queued-action queued-icon-action" onClick={() => { setQueuedMenu(""); setQueued((current) => current.filter((item) => item.id !== entry.id)); }} title={t("queued.discard")}>
+                    <Trash2Icon size={16} />
+                  </button>
+                  <div className="queued-more">
+                    <button type="button" className="queued-action queued-icon-action" onClick={() => setQueuedMenu((current) => current === entry.id ? "" : entry.id)} title={t("queued.more")}>
+                      <MoreHorizontal size={17} />
+                    </button>
+                    {queuedMenu === entry.id && (
+                      <div className="queued-menu">
+                        <button type="button" className="queued-menu-row" onClick={() => editQueued(entry)}>{t("queued.edit")}</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
               {pendingPermission ? (
                 <ApprovalForm tool={pendingPermission.tool} onResolve={(decision) => resolvePermission(pendingPermission.callId, decision)} />
               ) : (
@@ -4710,6 +4851,33 @@ const BrandMenu = ({ open, onToggle }) => (
       </button>
     </div>
   </div>
+);
+
+const ListEndIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M16 5H3" />
+    <path d="M16 12H3" />
+    <path d="M9 19H3" />
+    <path d="m16 16-3 3 3 3" />
+    <path d="M21 5v12a2 2 0 0 1-2 2h-6" />
+  </svg>
+);
+
+const CornerDownRightIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="m15 10 5 5-5 5" />
+    <path d="M4 4v7a4 4 0 0 0 4 4h12" />
+  </svg>
+);
+
+const Trash2Icon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  </svg>
 );
 
 const GripIcon = ({ size = 24, ...rest }) => (
@@ -5699,6 +5867,10 @@ const clusterKind = (tool) => {
 const groupWorkSegments = (segments) => {
   const blocks = [];
   for (const seg of segments) {
+    if (seg.type === "steer") {
+      blocks.push({ kind: "steer", text: seg.text });
+      continue;
+    }
     if (seg.type === "text") {
       if ((seg.content || "").trim()) {
         blocks.push({ kind: "text", content: seg.content });
@@ -5814,6 +5986,16 @@ const clusterFileCount = (tools) => {
   return seen.size;
 };
 
+const grepResultMeta = (result) => {
+  if (!Array.isArray(result?.matches)) {
+    return "";
+  }
+  if (result.capped) {
+    return t("grep.capped", { n: result.count || result.matches.length });
+  }
+  return result.matches.length ? t("grep.matches", { n: result.matches.length }) : t("grep.noMatches");
+};
+
 const clusterRowLabel = (tool) => {
   const result = tool.result || {};
   const name = (tool.name || "").toLowerCase();
@@ -5839,6 +6021,9 @@ const clusterRowMeta = (tool) => {
   if (isEditTool(tool)) {
     const diff = result.diff || {};
     return `+${diff.added ?? 0} −${diff.removed ?? 0}`;
+  }
+  if (name === "grep_files" && Array.isArray(result.matches)) {
+    return grepResultMeta(result);
   }
   if (name === "read_file") {
     const start = Number(result.startLine ?? tool.args?.start_line) || 0;
@@ -5870,10 +6055,17 @@ const ClusterRow = ({ tool }) => {
       </summary>
       <div className="cluster-row-body">
         {diff && <DiffView diff={diff} />}
+        {!diff && Array.isArray(result.matches) && (result.matches.length
+          ? <>
+              {result.regexFallback && <div className="tool-meta">{t("grep.fallback")}</div>}
+              {result.capped && <div className="tool-warning">{grepResultMeta(result)}</div>}
+              <PreBlock text={result.matches.map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")} />
+            </>
+          : <div className="tool-meta">{t("grep.noMatches")}</div>)}
         {!diff && result.content && <PreBlock text={result.content} />}
         {!diff && result.stdout && <PreBlock text={result.stdout} />}
         {!diff && result.stderr && <PreBlock text={result.stderr} className="stderr" />}
-        {!diff && !result.content && !result.stdout && !result.stderr && <div className="tool-meta">{getToolLabel(tool)}</div>}
+        {!diff && !result.matches && !result.content && !result.stdout && !result.stderr && <div className="tool-meta">{getToolLabel(tool)}</div>}
       </div>
     </details>
   );
@@ -6111,7 +6303,11 @@ const ToolStep = ({ tool }) => {
         {result.reason && <div className="tool-warning">{result.reason}</div>}
         {result.denied && <div className="tool-warning">{result.note || t("tool.denied")}</div>}
         {Array.isArray(result.matches) && (result.matches.length
-          ? <pre>{result.matches.slice(0, 100).map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")}</pre>
+          ? <>
+              {result.regexFallback && <div className="tool-meta">{t("grep.fallback")}</div>}
+              <div className={result.capped ? "tool-warning" : "tool-meta"}>{grepResultMeta(result)}</div>
+              <pre>{result.matches.slice(0, 100).map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")}</pre>
+            </>
           : <div className="tool-meta">{t("grep.noMatches")}</div>)}
         {result.stdout && <PreBlock text={result.stdout} />}
         {result.stderr && <PreBlock text={result.stderr} className="stderr" />}
@@ -6148,6 +6344,14 @@ const LiveToolStep = ({ tool }) => {
     </div>
   );
 };
+
+const SteerStep = ({ text }) => (
+  <div className="message user steer-message">
+    <div className="message-surface user-surface">
+      <div className="message-text plain">{text}</div>
+    </div>
+  </div>
+);
 
 const TodoStep = ({ tool }) => {
   const todos = tool?.result?.todos || [];
@@ -6202,7 +6406,7 @@ const searchedLabel = (result, fallbackUrls = []) => {
   }
   return hosts.length === 1
     ? t("web.searchedSite", { site: hosts[0] })
-    : t("web.searchedSites", { site: hosts[0], n: hosts.length - 1 });
+    : t("web.searchedSites", { n: hosts.length });
 };
 
 const WebSearchStep = ({ tool }) => {
@@ -6335,6 +6539,9 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan }) =>
           }
           if (block.kind === "planBlocked") {
             return <PlanBlockedNote tool={block.tool} hasPlan={hasPlan} key={key} />;
+          }
+          if (block.kind === "steer") {
+            return <SteerStep text={block.text} key={key} />;
           }
           if (block.kind === "todos") {
             return <TodoStep tool={block.tool} key={key} />;
@@ -6500,7 +6707,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
     const segs = message.segments;
     const planSeg = segs.find((seg) => seg.type === "tool" && seg.tool.result?.plan);
     const working = !message.done;
-    const hasWork = segs.some((seg) => seg.type === "tool" && !seg.tool.result?.plan) || Boolean(message.liveTool);
+    const hasWork = segs.some((seg) => (seg.type === "tool" && !seg.tool.result?.plan) || seg.type === "steer") || Boolean(message.liveTool);
     // continue_thinking adds no tool segment, so without this the announcing sentence stays invisible until the turn ends, which is exactly the silence the tool exists to break
     const extendedTurn = Boolean(message.extendedThinking);
     let workSegs = segs;
@@ -6760,7 +6967,11 @@ const ToolTimeline = ({ tools }) => (
               {result.reason && <div className="tool-warning">{result.reason}</div>}
               {result.cwd && <div className="tool-meta">cwd: {result.cwd}</div>}
               {Array.isArray(result.matches) && (result.matches.length
-                ? <pre>{result.matches.slice(0, 100).map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")}</pre>
+                ? <>
+                    {result.regexFallback && <div className="tool-meta">{t("grep.fallback")}</div>}
+                    <div className={result.capped ? "tool-warning" : "tool-meta"}>{grepResultMeta(result)}</div>
+                    <pre>{result.matches.slice(0, 100).map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")}</pre>
+                  </>
                 : <div className="tool-meta">{t("grep.noMatches")}</div>)}
               {result.stdout && <PreBlock text={result.stdout} />}
               {result.stderr && <PreBlock text={result.stderr} className="stderr" />}

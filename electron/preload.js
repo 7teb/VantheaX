@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld("agentApi", {
     });
   },
   cancelStream: (requestId) => ipcRenderer.invoke("agent:cancel", requestId),
+  injectMessage: (requestId, text, steerId) => ipcRenderer.invoke("agent:inject", requestId, text, steerId),
   minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
   maximizeWindow: () => ipcRenderer.invoke("window:maximize"),
   getWindowState: () => ipcRenderer.invoke("window:state"),

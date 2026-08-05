@@ -8,7 +8,7 @@ const src = fs.readFileSync(path.join(root, "electron", "main.js"), "utf8");
 const catalog = JSON.parse(fs.readFileSync(path.join(root, "config", "models.json"), "utf8"));
 
 const start = src.indexOf("const clampNumber");
-const endAnchor = ": openRouterBody(payload.model, payload.effort, messages, tools));";
+const endAnchor = ": openRouterBody(entry, payload.model, payload.effort, messages, tools));";
 const end = src.indexOf(endAnchor, start);
 if (start === -1 || end === -1) {
   console.error("Could not extract the body builders from main.js");
@@ -123,13 +123,30 @@ check("no tools key when the tool list is empty", noTools.tools === undefined &&
 
 const or = buildRequestBody(entry("deepseek/deepseek-v4-flash"), SETTINGS, { model: "deepseek/deepseek-v4-flash", effort: "xhigh" }, MESSAGES, TOOLS);
 check("openrouter model keeps reasoning object", eq(or.reasoning, { effort: "xhigh" }), JSON.stringify(or.reasoning));
-check("openrouter model keeps provider pin", eq(or.provider, { order: ["DeepSeek"], allow_fallbacks: false }));
+check("openrouter model keeps provider pin", eq(or.provider, { order: ["deepseek"], allow_fallbacks: false }));
 check("openrouter model sends no max_tokens", or.max_tokens === undefined);
 check("openrouter model sends no reasoning_effort", or.reasoning_effort === undefined);
 check("openrouter model keeps its own id", or.model === "deepseek/deepseek-v4-flash");
 
 const glmOr = buildRequestBody(entry("z-ai/glm-5.2"), SETTINGS, { model: "z-ai/glm-5.2", effort: "high" }, MESSAGES, TOOLS);
-check("openrouter glm pins Z.AI", eq(glmOr.provider, { order: ["Z.AI"], allow_fallbacks: false }));
+check("openrouter glm pins Z.AI", eq(glmOr.provider, { order: ["z-ai", "z-ai/fp8"], allow_fallbacks: false }));
+
+const PINNED = {
+  "moonshotai/kimi-k3": ["moonshotai", "moonshotai/mxfp4"],
+  "anthropic/claude-opus-5": ["anthropic"],
+  "anthropic/claude-sonnet-5": ["anthropic"],
+  "openai/gpt-5.6-sol": ["openai"],
+  "openai/gpt-5.6-terra": ["openai"],
+  "qwen/qwen3.8-max": ["alibaba"],
+  "x-ai/grok-4.5": ["xai/zdr"],
+};
+for (const [id, order] of Object.entries(PINNED)) {
+  const body = build(id, "high");
+  check(`${id} is in the catalog`, Boolean(entry(id)));
+  check(`${id} pins ${order.join("+")}`, eq(body.provider, { order, allow_fallbacks: false }), JSON.stringify(body.provider));
+  check(`${id} keeps reasoning`, eq(body.reasoning, { effort: "high" }), JSON.stringify(body.reasoning));
+  check(`${id} sends no nvidia fields`, body.max_tokens === undefined && body.reasoning_effort === undefined);
+}
 
 const nvidiaIds = catalog.filter((m) => m.apiProvider === "nvidia");
 check("five nvidia models in the catalog", nvidiaIds.length === 5, String(nvidiaIds.length));
