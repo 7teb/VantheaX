@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld("agentApi", {
   analyzeImage: (payload) => ipcRenderer.invoke("image:analyze", payload),
   loadImage: (name) => ipcRenderer.invoke("image:load", name),
   exportImage: (name) => ipcRenderer.invoke("image:export", name),
+  listArtifacts: (projectPath) => ipcRenderer.invoke("artifacts:list", projectPath),
+  updateArtifact: (name, patch) => ipcRenderer.invoke("artifacts:update", name, patch),
   deleteImages: (names) => ipcRenderer.invoke("image:delete", names),
   chooseProject: () => ipcRenderer.invoke("project:choose"),
   createProject: () => ipcRenderer.invoke("project:create"),

@@ -280,6 +280,11 @@ const STRINGS = {
     "imagegen.modelSub": "Runs over your OpenRouter key",
     "imagegen.quality": "Quality",
     "imagegen.download": "Download image",
+    "artifacts.title": "Artifacts",
+    "artifacts.sub": "Generated images",
+    "artifacts.empty": "No generated images in this project yet",
+    "artifacts.pin": "Pin",
+    "artifacts.unpin": "Unpin",
     "imagegen.qAuto": "Auto",
     "imagegen.qLow": "Low",
     "imagegen.qMedium": "Medium",
@@ -729,6 +734,11 @@ const STRINGS = {
     "imagegen.modelSub": "Läuft über deinen OpenRouter-Key",
     "imagegen.quality": "Qualität",
     "imagegen.download": "Bild herunterladen",
+    "artifacts.title": "Artefakte",
+    "artifacts.sub": "Generierte Bilder",
+    "artifacts.empty": "Noch keine generierten Bilder in diesem Projekt",
+    "artifacts.pin": "Anpinnen",
+    "artifacts.unpin": "Lösen",
     "imagegen.qAuto": "Auto",
     "imagegen.qLow": "Niedrig",
     "imagegen.qMedium": "Mittel",
@@ -2279,6 +2289,11 @@ const App = () => {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [browserFull, setBrowserFull] = useState(false);
   const [browserClosing, setBrowserClosing] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [artifactsFull, setArtifactsFull] = useState(false);
+  const [artifactsClosing, setArtifactsClosing] = useState(false);
+  const [artifactsWake, setArtifactsWake] = useState(0);
+  const artifactsCloseTimer = useRef(null);
   const [backgroundWake, setBackgroundWake] = useState(0);
   const [termTabs, setTermTabs] = useState([]);
   const [termActive, setTermActive] = useState(0);
@@ -3232,6 +3247,15 @@ const App = () => {
       setBrowserFull(false);
       browserController.reset();
     }
+    if (artifactsCloseTimer.current) {
+      clearTimeout(artifactsCloseTimer.current);
+      artifactsCloseTimer.current = null;
+    }
+    setArtifactsClosing(false);
+    if (keep !== "artifacts") {
+      setArtifactsOpen(false);
+      setArtifactsFull(false);
+    }
     setInspectorOpen(false);
   };
 
@@ -3240,6 +3264,12 @@ const App = () => {
       setRightPanel("");
       closeDockExcept("background");
       setBackgroundOpen(true);
+      return;
+    }
+    if (view === "artifacts") {
+      setRightPanel("");
+      closeDockExcept("artifacts");
+      setArtifactsOpen(true);
       return;
     }
     if (backgroundOpen) {
@@ -3318,6 +3348,19 @@ const App = () => {
     setBrowserOpen(true);
   };
 
+  const closeArtifacts = () => {
+    if (artifactsCloseTimer.current) {
+      clearTimeout(artifactsCloseTimer.current);
+    }
+    setArtifactsOpen(false);
+    setArtifactsFull(false);
+    setArtifactsClosing(true);
+    artifactsCloseTimer.current = setTimeout(() => {
+      setArtifactsClosing(false);
+      artifactsCloseTimer.current = null;
+    }, 260);
+  };
+
   const browserController = useBrowserController({
     api,
     onOpen: () => {
@@ -3363,7 +3406,7 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (!terminalOpen && !backgroundOpen && !browserOpen) {
+    if (!terminalOpen && !backgroundOpen && !browserOpen && !artifactsOpen) {
       return;
     }
     const onResize = () => {
@@ -3374,7 +3417,7 @@ const App = () => {
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [terminalOpen, backgroundOpen, browserOpen, sidebarCollapsed]);
+  }, [terminalOpen, backgroundOpen, browserOpen, artifactsOpen, sidebarCollapsed]);
 
   useEffect(() => {
     const chatId = activeChat?.id || "";
@@ -3689,6 +3732,9 @@ const App = () => {
       }
       if (event.type === "tool") {
         turnStore.applyTool(requestId, event.tool?.id);
+        if (event.tool?.result?.imageGen && Array.isArray(event.tool.result.images) && event.tool.result.images.length) {
+          setArtifactsWake((value) => value + 1);
+        }
         if (event.hidden) {
           if (event.tool?.result?.extendedThinking && !event.tool.result.exhausted) {
             turnStore.setExtended(requestId, true);
@@ -4027,7 +4073,7 @@ const App = () => {
   };
 
   return (
-    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""} ${backgroundOpen ? "background-open" : ""} ${backgroundOpen && backgroundFull ? "background-full" : ""} ${browserOpen ? "browser-open" : ""} ${browserOpen && browserFull ? "browser-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
+    <div className={`window-root ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${inspectorOpen ? "inspector-open" : "inspector-closed"} ${terminalOpen ? "terminal-open" : ""} ${terminalOpen && terminalFull ? "terminal-full" : ""} ${backgroundOpen ? "background-open" : ""} ${backgroundOpen && backgroundFull ? "background-full" : ""} ${browserOpen ? "browser-open" : ""} ${browserOpen && browserFull ? "browser-full" : ""} ${artifactsOpen ? "artifacts-open" : ""} ${artifactsOpen && artifactsFull ? "artifacts-full" : ""}`} style={{ "--term-width": `${termWidth}px` }}>
       <header className="titlebar">
         <div className="titlebar-left">
           <button className="chrome-button sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? t("title.sidebarOpen") : t("title.sidebarClose")}>
@@ -4157,7 +4203,7 @@ const App = () => {
           <button className="root-open-button" onClick={() => api.openRoot(projectPath, activeChat?.workspaceName || "")} title={t("panels.openRoot")}>
             <ListTreeIcon size={14} />
           </button>
-          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} backgroundOpen={backgroundOpen} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
+          <PanelSwitch open={rightPanel === "menu"} active={rightPanel} backgroundOpen={backgroundOpen} artifactsOpen={artifactsOpen} todos={todos} onToggle={() => setRightPanel((value) => (value === "menu" ? "" : "menu"))} onPick={openRightPanel} />
           <ContextPanel open={rightPanel === "context"} onCompact={requestCompact} pendingCompact={pendingCompact} />
           <TodoPanel todos={todos} goalMode={goalMode} goal={goalText} goalDone={goalDone} open={rightPanel === "tasks"} />
           {messages.length > 0 && (
@@ -4315,7 +4361,7 @@ const App = () => {
             <pre className="file-preview">{selectedContent || t("inspector.previewHint")}</pre>
           </aside>
         )}
-        {(terminalOpen && !terminalFull) || (backgroundOpen && !backgroundFull) || (browserOpen && !browserFull) ? (
+        {(terminalOpen && !terminalFull) || (backgroundOpen && !backgroundFull) || (browserOpen && !browserFull) || (artifactsOpen && !artifactsFull) ? (
           <div className="terminal-resizer" onMouseDown={startTermResize} title={t("terminal.resize")} />
         ) : null}
         {(terminalOpen || termClosing) && (
@@ -4361,6 +4407,16 @@ const App = () => {
             }}
             onToggleFull={() => setBrowserFull((value) => !value)}
             onClose={closeBrowser}
+          />
+        )}
+        {(artifactsOpen || artifactsClosing) && (
+          <ArtifactsPanel
+            projectPath={projectPath}
+            wake={artifactsWake}
+            full={artifactsFull}
+            onToggleFull={() => setArtifactsFull((value) => !value)}
+            onClose={closeArtifacts}
+            onImageClick={setLightbox}
           />
         )}
       </div>
@@ -5167,7 +5223,7 @@ const GitBranchPlusIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
-const PanelSwitch = ({ open, active, backgroundOpen, todos, onToggle, onPick }) => {
+const PanelSwitch = ({ open, active, backgroundOpen, artifactsOpen, todos, onToggle, onPick }) => {
   const usage = useContextUsage();
   const backgroundTasks = useBackgroundTasks();
   const budget = usage?.budget || 512000;
@@ -5178,7 +5234,7 @@ const PanelSwitch = ({ open, active, backgroundOpen, todos, onToggle, onPick }) 
   const finished = backgroundTasks.length - running;
   return (
     <div className="panel-switch">
-      <button className={open || active || backgroundOpen ? "panel-switch-button is-on" : "panel-switch-button"} onClick={onToggle} title={t("panels.title")}>
+      <button className={open || active || backgroundOpen || artifactsOpen ? "panel-switch-button is-on" : "panel-switch-button"} onClick={onToggle} title={t("panels.title")}>
         <MoreVertical size={14} />
       </button>
       <div className={open ? "panel-menu open" : "panel-menu"}>
@@ -5201,6 +5257,13 @@ const PanelSwitch = ({ open, active, backgroundOpen, todos, onToggle, onPick }) 
           <span className="brand-menu-text">
             <span className="brand-menu-title">{t("background.title")}</span>
             <span className="brand-menu-desc">{running ? t("background.running", { n: running }) : t("background.finished", { n: finished })}</span>
+          </span>
+        </button>
+        <button className={artifactsOpen ? "brand-menu-row is-active" : "brand-menu-row"} onClick={() => onPick("artifacts")}>
+          <span className="brand-menu-icon"><PaletteIcon size={17} /></span>
+          <span className="brand-menu-text">
+            <span className="brand-menu-title">{t("artifacts.title")}</span>
+            <span className="brand-menu-desc">{t("artifacts.sub")}</span>
           </span>
         </button>
       </div>
@@ -6718,6 +6781,90 @@ const WebSearchGroup = ({ tools }) => {
         ))}
       </div>
     </details>
+  );
+};
+
+const PaletteIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z" />
+    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+  </svg>
+);
+
+const ArtifactsPanel = ({ projectPath, wake, full, onToggleFull, onClose, onImageClick }) => {
+  const [items, setItems] = useState([]);
+  const [renaming, setRenaming] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  useEffect(() => {
+    let alive = true;
+    api.listArtifacts(projectPath).then((list) => {
+      if (alive && Array.isArray(list)) {
+        setItems(list);
+      }
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [projectPath, wake]);
+  const patch = (name, changes) => {
+    setItems((current) => current.map((item) => item.name === name ? { ...item, ...changes } : item));
+    api.updateArtifact(name, changes).catch(() => {});
+  };
+  const commitRename = () => {
+    if (renaming) {
+      patch(renaming, { title: renameValue.trim() });
+    }
+    setRenaming("");
+  };
+  const sorted = [...items].sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return (
+    <aside className="background-panel artifacts-panel">
+      <div className="background-head">
+        <span className="background-heading">{t("artifacts.title")}</span>
+        <div className="terminal-actions">
+          <button className="terminal-action" title={full ? t("background.exitFullscreen") : t("background.fullscreen")} onClick={onToggleFull}>
+            {full ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+          <button className="terminal-action terminal-action-close" title={t("browser.close")} onClick={onClose}><X size={16} /></button>
+        </div>
+      </div>
+      <div className="background-body">
+        {!sorted.length && <div className="artifacts-empty">{t("artifacts.empty")}</div>}
+        <div className="artifacts-list">
+          {sorted.map((item) => (
+            <div className="artifact-card" key={item.name}>
+              <button type="button" className="artifact-thumb" onClick={() => onImageClick?.({ name: item.name })}>
+                <AttachmentImage attachment={{ name: item.name }} />
+              </button>
+              <div className="artifact-info">
+                {renaming === item.name ? (
+                  <input
+                    className="artifact-rename-input"
+                    value={renameValue}
+                    autoFocus
+                    onChange={(event) => setRenameValue(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === "Enter") { commitRename(); } if (event.key === "Escape") { setRenaming(""); } }}
+                    onBlur={commitRename}
+                  />
+                ) : (
+                  <div className="artifact-title">
+                    {item.pinned && <Pin size={11} className="artifact-pin-mark" />}
+                    <span>{item.title || item.prompt || item.name}</span>
+                  </div>
+                )}
+                <div className="artifact-meta">{item.model}{item.createdAt ? ` · ${formatRelativeTime(item.createdAt)}` : ""}</div>
+              </div>
+              <div className="artifact-actions">
+                <button type="button" className="artifact-action" title={item.pinned ? t("artifacts.unpin") : t("artifacts.pin")} onClick={() => patch(item.name, { pinned: !item.pinned })}><Pin size={14} /></button>
+                <button type="button" className="artifact-action" title={t("chat.rename")} onClick={() => { setRenaming(item.name); setRenameValue(item.title || ""); }}><PencilLine size={14} /></button>
+                <button type="button" className="artifact-action" title={t("imagegen.download")} onClick={() => api.exportImage(item.name).catch(() => {})}><Download size={14} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
   );
 };
 

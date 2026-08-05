@@ -393,6 +393,14 @@ textarea {
   grid-template-columns: 0 minmax(0, 1fr) var(--term-width, 42%);
 }
 
+.artifacts-open .app-shell {
+  grid-template-columns: 300px minmax(0, 1fr) var(--term-width, 42%);
+}
+
+.artifacts-open.sidebar-collapsed .app-shell {
+  grid-template-columns: 0 minmax(0, 1fr) var(--term-width, 42%);
+}
+
 .terminal-full .app-shell {
   grid-template-columns: 300px 0 minmax(0, 1fr);
 }
@@ -417,16 +425,26 @@ textarea {
   grid-template-columns: 0 0 minmax(0, 1fr);
 }
 
+.artifacts-full .app-shell {
+  grid-template-columns: 300px 0 minmax(0, 1fr);
+}
+
+.artifacts-full.sidebar-collapsed .app-shell {
+  grid-template-columns: 0 0 minmax(0, 1fr);
+}
+
 .terminal-full .chat-panel,
 .background-full .chat-panel,
-.browser-full .chat-panel {
+.browser-full .chat-panel,
+.artifacts-full .chat-panel {
   overflow: hidden;
   pointer-events: none;
 }
 
 .terminal-open .app-shell,
 .background-open .app-shell,
-.browser-open .app-shell {
+.browser-open .app-shell,
+.artifacts-open .app-shell {
   position: relative;
 }
 
@@ -6555,6 +6573,118 @@ textarea {
 .web-seg button.is-on {
   background: color-mix(in srgb, var(--text) 13%, transparent);
   color: var(--text);
+}
+
+.artifacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifact-card {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.artifact-thumb {
+  flex: 0 0 auto;
+  width: 54px;
+  height: 54px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface-3);
+  cursor: zoom-in;
+}
+
+.artifact-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.artifact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.artifact-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-pin-mark {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.artifact-meta {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.artifact-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease;
+}
+
+.artifact-action:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.artifact-rename-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  outline: 0;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.artifacts-empty {
+  padding: 22px 8px;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-align: center;
 }
 
 .imagegen-step {
