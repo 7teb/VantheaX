@@ -1182,7 +1182,7 @@ const fileNoteFor = (attachment) => `\n\n[ATTACHED FILE "${attachment.displayNam
 
 const attachmentNoteFor = (attachment) => {
   if (attachment?.generated) {
-    return `\n\n[GENERATED IMAGE "${attachment.name}": you created this image with generate_image earlier in this chat. To edit or build on it, pass this exact name in source_images.]`;
+    return "";
   }
   return attachment?.kind === "file" ? fileNoteFor(attachment) : visualNoteFor(attachment);
 };
@@ -1195,6 +1195,20 @@ const collectFileAttachments = (messages) => {
       if (att?.kind === "file" && att.name && !seen.has(att.name)) {
         seen.add(att.name);
         out.push({ name: att.name, displayName: att.displayName || att.name, size: att.size || 0 });
+      }
+    }
+  }
+  return out;
+};
+
+const collectGeneratedImages = (messages) => {
+  const out = [];
+  const seen = new Set();
+  for (const message of messages || []) {
+    for (const att of messageAttachments(message)) {
+      if (att?.generated && att.name && !seen.has(att.name)) {
+        seen.add(att.name);
+        out.push(att.name);
       }
     }
   }
@@ -3152,6 +3166,7 @@ const App = () => {
       history: cleanHistory(effective),
       modelHandoff: collectModelHandoff(effective, settings.model, currentModel?.label || settings.model),
       readPaths: collectReadPaths(effective),
+      generatedImages: collectGeneratedImages(effective),
     };
   };
 
@@ -3674,6 +3689,7 @@ const App = () => {
           summary: effSummary,
           history: cleanHistory(previousMessages.slice(effStart)),
           readPaths: collectReadPaths(previousMessages.slice(effStart)),
+          generatedImages: collectGeneratedImages(previousMessages.slice(effStart)),
         });
         if (usage && usage.budget && usage.total >= COMPACT_THRESHOLD * usage.budget && !compactingRef.current.has(chat.id)) {
           compactingRef.current.add(chat.id);
@@ -3809,6 +3825,7 @@ const App = () => {
         modelHandoff: collectModelHandoff(previousMessages.slice(effStart), settings.model, currentModel?.label || settings.model),
         readPaths: collectReadPaths(previousMessages.slice(effStart)),
         fileAttachments: collectFileAttachments([...previousMessages.slice(effStart), userMessage]),
+        generatedImages: collectGeneratedImages(previousMessages.slice(effStart)),
       }, (event) => {
         if (event.type === "context") {
           contextUsageStore.acceptEvent(event);
@@ -4329,15 +4346,15 @@ const App = () => {
                   <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} narrator={Boolean(settings.narrator?.enabled)} mode={settings.mode} open={modelOpen} onToggle={() => setModelOpen(!modelOpen)} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} onNarratorChange={(enabled) => persistSettings({ narrator: { ...(settings.narrator || {}), enabled } })} onModeChange={(mode) => persistSettings({ mode })} />
                   {(naming || sending) ? (
                     <button className="send-button is-naming" disabled title={naming ? t("composer.naming") : t("composer.sending")}>
-                      <LoaderIcon size={17} />
+                      <LoaderIcon size={14} />
                     </button>
                   ) : busy ? (
                     <button className="send-button is-stopping" onClick={stopGeneration} title={t("composer.stop")}>
-                      <Square size={15} />
+                      <Square size={12} />
                     </button>
                   ) : (
                     <button className="send-button" onClick={submitFromComposer} disabled={compressing || (!input.trim() && !imageAttachments.length && !fileAttachments.length)}>
-                      <ArrowUp size={18} />
+                      <ArrowUp size={15} />
                     </button>
                   )}
                 </div>
@@ -4692,7 +4709,7 @@ const ModelEffortPicker = ({ models, value, effort, narrator, mode, open, onTogg
       <button className="model-effort-trigger" onClick={onToggle} aria-expanded={open}>
         <span className="model-name">{compactModelName(selected)}</span>
         {hasEfforts && <span className="effort-name">{effortLabel(activeEffort)}</span>}
-        <ChevronDown size={13} className="model-trigger-chevron" />
+        <ChevronDown size={11} className="model-trigger-chevron" />
       </button>
       {open && (
         <div className={advanced ? "model-menu is-advanced" : "model-menu"}>
@@ -4925,7 +4942,7 @@ const TitlebarMenu = ({ open, setOpen, actions }) => {
 
 const PlusMenu = ({ open, onToggle, onPickFile, planMode, goalMode, onTogglePlan, onToggleGoal }) => (
   <div className="plus-picker">
-    <button className="tool-button" onClick={onToggle} title={t("plus.add")}><Plus size={17} /></button>
+    <button className="tool-button" onClick={onToggle} title={t("plus.add")}><Plus size={16} /></button>
     {open && (
       <div className="plus-menu">
         <button className="plus-menu-row" onClick={onPickFile}>
