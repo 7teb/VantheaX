@@ -10,13 +10,22 @@ Everything stays on your machine: your API keys, settings, and chats live in `%A
 - Reads, searches, outlines, edits, and writes files in the selected project. Writes are path-scoped to that project, so the agent can never touch anything outside it.
 - Runs shell commands (PowerShell) under three permission modes (see below).
 - Plan mode (read-only, drafts a plan for your approval before touching anything) and Goal mode (works toward a goal, with a second model verifying it is actually done).
+- Sub-agents: the agent can delegate a bounded job to a focused background agent with its own model and context, and continue that agent later with its context preserved. Useful for parallel investigations or read-heavy exploration that would otherwise fill the main context.
+- Background tasks: long non-interactive commands (a 40-minute script, a big build) start in the background and return a task ID immediately, so the turn does not sit there waiting.
+- A todo list the agent keeps updated while it works, so you can see the plan and what is left.
+- Attach text files to a message. The contents stay out of the context until the agent actually reads the file, so a large log does not cost you the whole window.
 - Built-in terminal: a real ConPTY shell with tabs, resizable, opened in the project root, for when you want to type commands yourself.
 
 **Web search**
 - Optional web search through [Tavily](https://tavily.com). Two depths: basic walks the sources it reads one at a time, advanced returns a synthesized answer (built with Gemini) plus the clickable sources. Needs a Tavily key, added in Settings.
 
+**Browser**
+- An in-app browser panel with tabs the agent can drive: navigate, click, type, scroll, and read the page as compact accessibility text rather than screenshots. When a page is canvas or image heavy and the text snapshot cannot represent it, the agent can fall back to a visual analysis of the screenshot; the first such use in a chat asks you first.
+
 **Images**
 - Attach or paste an image in any chat, with any model. Vision-incapable models still "see" it: a Gemini vision sidecar turns the picture into text the model reads. No raw image data is stored in your chat history.
+- Image generation (Settings > Image generation, off by default): ask for an image and the agent renders it through a dedicated image model. GPT Image 2, Qwen Image 3 Pro, Nano Banana 2, Nano Banana 2 Lite, and MAI Image 2.5 Pro. It can also edit an image, either one you attached or one it generated earlier in the chat.
+- Generated images collect in an Artifacts panel per project, where you can pin and download them.
 
 **Personalization** (Settings > Personalization)
 - Personality: pick a tone (pragmatic, friendly, or cynical) that is applied across every chat.
@@ -39,15 +48,21 @@ Everything stays on your machine: your API keys, settings, and chats live in `%A
 Two providers. OpenRouter is the default and the only one required.
 
 **OpenRouter** (needs an OpenRouter key)
-- DeepSeek V4 Flash, DeepSeek V4 Pro
+- DeepSeek V4 Flash, DeepSeek V4 Flash 0731, DeepSeek V4 Pro
 - GLM 5.2 (pinned to the first-party Z.ai provider)
-- Qwen 3.7 Plus, Qwen 3.7 Max (vision-capable)
+- Kimi K3
+- Qwen 3.7 Plus, Qwen 3.7 Max, Qwen 3.8 Max
+- GPT 5.6 Luna, GPT 5.6 Luna Pro, GPT 5.6 Sol, GPT 5.6 Terra
+- Claude Opus 5, Claude Sonnet 5
+- Grok 4.5
+
+All of them are vision-capable except the three DeepSeeks and GLM 5.2, and those still see attached images through the sidecar described above. The current list lives in `config/models.json`.
 
 **NVIDIA NIM** (optional second provider, needs an NVIDIA key)
 - DeepSeek V4 Flash, DeepSeek V4 Pro, GLM 5.2, MiniMax M3, Nemotron 3 Ultra 550B
-- NVIDIA's hosted endpoint has a free trial (currently 40 requests/minute, 1000 trial credits). Their trial terms are evaluation-only and state that your content and the generated content are collected to improve their products, including their AI models, so do not send private code through it. The app says the same in the "Model eval" settings tab.
+- NVIDIA's hosted endpoint has a free trial with its own rate and credit limits; check their current terms, the numbers change. The terms are evaluation-only and state that your content and the generated content are collected to improve their products, including their AI models, so do not send private code through it. The app says the same in the "Model eval" settings tab.
 
-The side jobs (chat naming, summaries, the Auto-mode safety check, image analysis, web-search synthesis, memory extraction) always run on OpenRouter, so a working OpenRouter key is expected even when the main model is an NVIDIA one.
+The side jobs (chat naming, summaries, the Auto-mode safety check, image analysis, browser visual analysis, image generation, web-search synthesis, memory extraction, the reasoning narrator) always run on OpenRouter, so a working OpenRouter key is expected even when the main model is an NVIDIA one.
 
 ## Permission modes
 
@@ -88,7 +103,7 @@ Or build a standalone Windows app:
 npm run dist
 ```
 
-That produces an installer under `outputs\`. For a portable build instead, run `npm run package` and launch `outputs\electron\win-unpacked\VantheaX.exe`.
+That produces an installer under `outputs\electron\`. For a portable build instead, run `npm run package` and launch `outputs\electron\win-unpacked\VantheaX.exe`.
 
 ## First start
 
