@@ -4315,7 +4315,7 @@ const App = () => {
                 </div>
               ))}
               {pendingPermission ? (
-                <ApprovalForm tool={pendingPermission.tool} onResolve={(decision) => resolvePermission(pendingPermission.callId, decision)} />
+                <ApprovalForm key={pendingPermission.callId} tool={pendingPermission.tool} onResolve={(decision) => resolvePermission(pendingPermission.callId, decision)} />
               ) : (
               <div className="composer">
                 {(imageAttachments.length > 0 || fileAttachments.length > 0) && (
@@ -5035,6 +5035,13 @@ const SquareTerminalIcon = ({ size = 24, ...rest }) => (
     <path d="m7 11 2-2-2-2" />
     <path d="M11 13h4" />
     <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+  </svg>
+);
+
+const AtSignIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
   </svg>
 );
 
@@ -6213,7 +6220,7 @@ const EditGroup = ({ tools }) => {
   return (
   <details className="edit-group">
     <summary>
-      <PencilSparklesIcon size={14} />
+      <span className="step-marker"><PencilSparklesIcon size={14} /></span>
       <span>{files === 1 ? t("edit.oneFile") : t("edit.nFiles", { n: files })}</span>
       <ChevronRight size={13} className="edit-chevron" />
     </summary>
@@ -6353,7 +6360,7 @@ const CommandGroup = ({ tools, kind }) => {
   return (
     <details className="cmd-group">
       <summary>
-        <Icon size={14} />
+        <span className="step-marker"><Icon size={14} /></span>
         <span>{label}</span>
         {Boolean(ranges) && <span className="cmd-group-meta">{ranges}</span>}
         <ChevronRight size={13} className="edit-chevron" />
@@ -6387,7 +6394,7 @@ const CombineGroup = ({ tools }) => {
   return (
     <details className="cmd-group">
       <summary>
-        <CombineIcon size={14} className="combine-marker" />
+        <span className="step-marker"><CombineIcon size={14} /></span>
         <span>{label}</span>
         <ChevronRight size={13} className="edit-chevron" />
       </summary>
@@ -6525,6 +6532,23 @@ const ToolStep = ({ tool }) => {
         <span className="step-marker"><GitBranchPlusIcon size={14} /></span>
         <span className="step-label">{t("background.started")}</span>
       </div>
+    );
+  }
+  if (result.agentStatus) {
+    const meta = [result.runtimeSeconds ? `${result.runtimeSeconds}s` : "", ...(result.recentTools || []).slice(-4)].filter(Boolean).join(" · ");
+    const body = result.report || result.lastActivity || "";
+    return (
+      <details className="tool-step">
+        <summary>
+          <span className="step-marker"><Icon size={14} /></span>
+          <span className="step-label">{label}</span>
+        </summary>
+        <div className="step-body">
+          {Boolean(meta) && <div className="tool-meta">{meta}</div>}
+          {Boolean(body) && <PreBlock text={body} />}
+          {!meta && !body && <div className="tool-meta">·</div>}
+        </div>
+      </details>
     );
   }
   if (result.running) {
@@ -7265,7 +7289,7 @@ const getToolIcon = (name = "") => {
     return LayoutDashboardIcon;
   }
   if (lower.startsWith("mcp__") || lower === "add_mcp_server") {
-    return Plug;
+    return AtSignIcon;
   }
   if (lower === "analyze_image" || lower.includes("image")) {
     return ImageIcon;

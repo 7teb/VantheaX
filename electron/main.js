@@ -1303,7 +1303,7 @@ const toolSpecs = [
           description: { type: "string", description: "One-line description of the responsibility assigned to this agent." },
           prompt: { type: "string", description: "Complete standalone task prompt: exact goal, relevant paths and findings, expected tools or approach, constraints, and what the final report must contain." },
           model: { type: "string", description: "Exact model id from the app model catalog. Any currently available UI model is allowed." },
-          profile: { type: "string", enum: ["explore", "worker"], description: "explore is read-only. worker can also edit files and run commands through the same permission and safety checks as you." },
+          profile: { type: "string", enum: ["explore", "worker"], description: "explore is read-only and its file tools only reach the open project folder. worker can also edit files and run commands through the same permission and safety checks as you. Any job that must inspect a path OUTSIDE the project folder (an external directory, another drive, a system location) needs worker, because only run_command can reach it, even when the job is purely read-only." },
         },
         required: ["name", "description", "prompt", "model", "profile"],
         additionalProperties: false,
@@ -2243,6 +2243,27 @@ const takeInjections = (requestId) => {
     return [];
   }
   pendingInjections.delete(requestId);
+  return list;
+};
+
+const pendingAgentReports = new Map();
+
+const queueAgentReport = (requestId, entry) => {
+  const id = String(requestId || "");
+  if (!id || !activeStreams.has(id)) {
+    return;
+  }
+  const list = pendingAgentReports.get(id) || [];
+  list.push(entry);
+  pendingAgentReports.set(id, list);
+};
+
+const takeAgentReports = (requestId) => {
+  const list = pendingAgentReports.get(requestId);
+  if (!list || !list.length) {
+    return [];
+  }
+  pendingAgentReports.delete(requestId);
   return list;
 };
 
@@ -3322,7 +3343,7 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   lines.push(personalityTone[payload.personality] || personalityTone.pragmatic);
   if (!payload.agentSession) {
     lines.push("For genuinely LARGE work you may take an extra reasoning pass before starting, with the continue_thinking tool. Use it when the task is designing a whole game, a whole framework or system architecture, a large multi-file refactor, or a real implementation plan, and whenever the user explicitly asks you to think longer or plan it out first. Do NOT use it for a small script, a few bug fixes, a single-file change, a question, or anything you can already start on: reaching for it on small work wastes the user's time. The shape is always the same: write ONE short sentence to the user saying you can do it and are going to think it through, then call continue_thinking in that SAME response with a concrete focus. It executes nothing and reads nothing, it only buys you another full round to plan in, and it shows the user 'Extended thinking' so a long pause does not look like a crash. Use the extra round properly (structure, the pieces and how they fit, the build order, what could go wrong), then do the work. It is capped per turn, never call it twice in a row, and never use it to stall instead of working. In plan mode it does not replace present_plan: think first if the design is large, then still present the plan with present_plan.");
-    lines.push("You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Deploy and continue calls return immediately after launch, so you can launch multiple useful agents or continue other independent work without waiting. Never poll: the app sends you an automatic internal event with the final report when an agent finishes. Sub-agents cannot talk to the user or deploy agents themselves.");
+    lines.push("You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Profile choice is about reach as well as safety: explore's tools cannot leave the open project folder, so an agent that must inspect any external path needs worker, because only run_command reaches it, even for a read-only investigation. Deploy and continue calls return immediately after launch, so you can launch multiple useful agents or continue other independent work without waiting. Never poll in a waiting loop: while your turn is still running, the app automatically injects an internal event with the final report the moment an agent finishes. If your turn ends before that, the report waits in the agent session; check it with get_agent_status at the start of your next turn instead of redeploying. Sub-agents cannot talk to the user or deploy agents themselves.");
     if (Array.isArray(payload.agentModels) && payload.agentModels.length) {
       lines.push(`Available agent models in the current UI: ${payload.agentModels.join(", ")}.`);
     }
@@ -4669,8 +4690,29 @@ const runDelegatedAgent = async (options) => {
     return outcome.value;
   }
   const { session, run } = outcome.value;
+  const requestId = options.payload?.requestId || "";
+  task.then((value) => {
+    queueAgentReport(requestId, {
+      agentId: session.id,
+      runId: run.id,
+      name: session.name,
+      status: value?.status || "completed",
+      durationMs: value?.durationMs || 0,
+      report: String(value?.report || ""),
+      writtenFiles: Array.isArray(value?.writtenFiles) ? value.writtenFiles : [],
+    });
+  }, () => {});
   task.catch(async (error) => {
     agentSessionManager?.addEntry(session.id, run.id, { type: "error", text: String(error?.message || error) });
+    queueAgentReport(requestId, {
+      agentId: session.id,
+      runId: run.id,
+      name: session.name,
+      status: "failed",
+      durationMs: 0,
+      report: `Agent failed: ${String(error?.message || error).slice(0, 1000)}`,
+      writtenFiles: [],
+    });
     await agentSessionManager?.finish(session.id, run.id, {
       status: "failed",
       report: `Agent failed: ${String(error?.message || error).slice(0, 1000)}`,
@@ -4837,6 +4879,15 @@ const runAgentStream = async (payload, sender) => {
           contextTracker?.commit();
           emit({ type: "steer", text: steer.text, steerId: steer.id });
         }
+        for (const done of takeAgentReports(payload.requestId)) {
+          const seconds = Math.max(1, Math.round((done.durationMs || 0) / 1000));
+          const files = done.writtenFiles.length ? ` Files it wrote: ${done.writtenFiles.slice(0, 20).join(", ")}.` : "";
+          messages.push({ role: "user", content: `[INTERNAL APP EVENT, not a user message] Your sub-agent "${done.name}" (${done.agentId}) finished with status ${done.status} after ${seconds}s.${files} Its final report follows. The user has not seen it: use it to continue the work and surface what matters in your visible answer.\n\nREPORT:\n${done.report.slice(0, 12000) || "(empty report)"}` });
+          contextTracker?.commit();
+          const reportEvent = { id: `agent-report-${done.runId}`, name: "get_agent_status", args: {}, result: { agentStatus: true, agentId: done.agentId, name: done.name, status: done.status, running: false, runtimeSeconds: seconds, report: capTranscriptText(done.report, 8000) } };
+          tools.push(reportEvent);
+          emit({ type: "tool", tool: reportEvent });
+        }
         const target = modelEntry?.apiProvider === "nvidia" ? { provider: "nvidia" } : null;
         const body = buildRequestBody(modelEntry, settings, payload, messages, toolsForContext(payload));
         const mcpSpecs = payload.planMode ? [] : mcpManager.getToolSpecs();
@@ -4892,7 +4943,7 @@ const runAgentStream = async (payload, sender) => {
           break;
         }
         if (!toolCalls.length) {
-          if ((pendingInjections.get(payload.requestId) || []).length) {
+          if ((pendingInjections.get(payload.requestId) || []).length || (pendingAgentReports.get(payload.requestId) || []).length) {
             continue;
           }
           if (message.finishReason === "length" && round < maxToolRounds - 1) {
@@ -5105,6 +5156,7 @@ const runAgentStream = async (payload, sender) => {
     return { content: fallback, tools, policy, steered: steeredIds };
   } finally {
     pendingInjections.delete(payload.requestId);
+    pendingAgentReports.delete(payload.requestId);
     contextTracker?.close();
     narrator.end();
   }
