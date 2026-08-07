@@ -143,6 +143,8 @@ const STRINGS = {
     "combine.browser.other": "{n} browser actions",
     "combine.edits.one": "edited {n} file",
     "combine.edits.other": "edited {n} files",
+    "combine.todos.one": "updated todos",
+    "combine.todos.other": "updated todos {n}x",
     "row.read": "Read {x}",
     "row.edited": "Edited {x}",
     "row.searched": "Searched {x}",
@@ -597,6 +599,8 @@ const STRINGS = {
     "combine.browser.other": "{n} Browseraktionen",
     "combine.edits.one": "{n} Datei bearbeitet",
     "combine.edits.other": "{n} Dateien bearbeitet",
+    "combine.todos.one": "To-dos aktualisiert",
+    "combine.todos.other": "To-dos {n}x aktualisiert",
     "row.read": "{x} gelesen",
     "row.edited": "{x} bearbeitet",
     "row.searched": "{x} durchsucht",
@@ -6108,6 +6112,9 @@ const clusterKind = (tool) => {
   if (result.running || result.permissionRequired || result.error || result.denied) {
     return null;
   }
+  if (Array.isArray(result.todos)) {
+    return "todos";
+  }
   if (tool.name === "run_command" && result.exitCode !== undefined) {
     return "commands";
   }
@@ -6148,10 +6155,6 @@ const groupWorkSegments = (segments) => {
       if (!last || last.kind !== "planBlocked") {
         blocks.push({ kind: "planBlocked", tool });
       }
-      continue;
-    }
-    if (tool?.result?.todos) {
-      blocks.push({ kind: "todos", tool });
       continue;
     }
     if (tool?.name === "web_search") {
@@ -6317,6 +6320,15 @@ const ClusterRow = ({ tool }) => {
   const label = clusterRowLabel(tool);
   const meta = clusterRowMeta(tool);
   const diff = isEditTool(tool) ? result.diff : null;
+  const hasBody = Boolean(diff || (Array.isArray(result.matches) && result.matches.length) || result.content || result.stdout || result.stderr);
+  if (!hasBody) {
+    return (
+      <div className="cluster-row-flat">
+        <span className="cluster-row-label">{label}</span>
+        {meta && <span className="cluster-row-meta">{meta}</span>}
+      </div>
+    );
+  }
   return (
     <details className="cluster-row">
       <summary>
@@ -6326,17 +6338,16 @@ const ClusterRow = ({ tool }) => {
       </summary>
       <div className="cluster-row-body">
         {diff && <DiffView diff={diff} />}
-        {!diff && Array.isArray(result.matches) && (result.matches.length
-          ? <>
-              {result.regexFallback && <div className="tool-meta">{t("grep.fallback")}</div>}
-              {result.capped && <div className="tool-warning">{grepResultMeta(result)}</div>}
-              <PreBlock text={result.matches.map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")} />
-            </>
-          : <div className="tool-meta">{t("grep.noMatches")}</div>)}
+        {!diff && Array.isArray(result.matches) && result.matches.length > 0 && (
+          <>
+            {result.regexFallback && <div className="tool-meta">{t("grep.fallback")}</div>}
+            {result.capped && <div className="tool-warning">{grepResultMeta(result)}</div>}
+            <PreBlock text={result.matches.map((m) => `${m.path}:${m.line}: ${m.text}`).join("\n")} />
+          </>
+        )}
         {!diff && result.content && <PreBlock text={result.content} />}
         {!diff && result.stdout && <PreBlock text={result.stdout} />}
         {!diff && result.stderr && <PreBlock text={result.stderr} className="stderr" />}
-        {!diff && !result.matches && !result.content && !result.stdout && !result.stderr && <div className="tool-meta">{getToolLabel(tool)}</div>}
       </div>
     </details>
   );
@@ -6641,16 +6652,12 @@ const SteerStep = ({ text }) => (
   </div>
 );
 
-const TodoStep = ({ tool }) => {
-  const todos = tool?.result?.todos || [];
-  const label = todos.some((item) => item.done) ? t("toollabel.updateTodos") : t("toollabel.addTodos");
-  return (
-    <div className="tool-step todo-step">
-      <span className="step-marker todo-step-mark"><SquarePenIcon size={14} /></span>
-      <span className="step-label">{label}</span>
-    </div>
-  );
-};
+const TodoStep = ({ tool }) => (
+  <div className="tool-step todo-step">
+    <span className="step-marker todo-step-mark"><SquarePenIcon size={14} /></span>
+    <span className="step-label">{getToolLabel(tool)}</span>
+  </div>
+);
 
 const linkifyCitations = (text, sources) => {
   const list = Array.isArray(sources) ? sources : [];
@@ -7014,6 +7021,9 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan, onIm
           if (block.kind === "bundle") {
             if (block.tools.length === 1) {
               const only = block.tools[0];
+              if (only.result?.todos) {
+                return <TodoStep tool={only} key={key} />;
+              }
               return isEditTool(only)
                 ? <EditGroup tools={[only]} key={key} />
                 : <ToolStep tool={only} key={key} />;
@@ -7023,7 +7033,9 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan, onIm
               const onlyKind = [...kinds][0];
               return onlyKind === "edits"
                 ? <EditGroup tools={block.tools} key={key} />
-                : <CommandGroup tools={block.tools} kind={onlyKind} key={key} />;
+                : onlyKind === "todos"
+                  ? <CombineGroup tools={block.tools} key={key} />
+                  : <CommandGroup tools={block.tools} kind={onlyKind} key={key} />;
             }
             return <CombineGroup tools={block.tools} key={key} />;
           }
@@ -7032,9 +7044,6 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan, onIm
           }
           if (block.kind === "steer") {
             return <SteerStep text={block.text} key={key} />;
-          }
-          if (block.kind === "todos") {
-            return <TodoStep tool={block.tool} key={key} />;
           }
           if (block.kind === "websearch") {
             return <WebSearchGroup tools={block.tools} key={key} />;
@@ -7336,6 +7345,9 @@ const getToolLabel = (tool) => {
   }
   if (name === "datetime") {
     return t("toollabel.datetime");
+  }
+  if (Array.isArray(result.todos)) {
+    return result.todos.some((item) => item.done) ? t("toollabel.updateTodos") : t("toollabel.addTodos");
   }
   if (name === "web_search") {
     return t("toollabel.webSearch");
