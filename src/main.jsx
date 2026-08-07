@@ -145,7 +145,9 @@ const STRINGS = {
     "combine.edits.one": "edited {n} file",
     "combine.edits.other": "edited {n} files",
     "combine.todos.one": "updated todos",
-    "combine.todos.other": "updated todos {n}x",
+    "combine.todos.other": "updated todos",
+    "message.more": "Show more",
+    "message.less": "Show less",
     "combine.agents.one": "deployed {n} agent",
     "combine.agents.other": "deployed {n} agents",
     "row.read": "Read {x}",
@@ -606,7 +608,9 @@ const STRINGS = {
     "combine.edits.one": "{n} Datei bearbeitet",
     "combine.edits.other": "{n} Dateien bearbeitet",
     "combine.todos.one": "To-dos aktualisiert",
-    "combine.todos.other": "To-dos {n}x aktualisiert",
+    "combine.todos.other": "To-dos aktualisiert",
+    "message.more": "Mehr anzeigen",
+    "message.less": "Weniger anzeigen",
     "combine.agents.one": "{n} Agent deployed",
     "combine.agents.other": "{n} Agenten deployed",
     "row.read": "{x} gelesen",
@@ -6134,28 +6138,29 @@ const clusterKind = (tool) => {
     return "edits";
   }
   const result = tool.result || {};
-  if (result.running || result.permissionRequired || result.error || result.denied || result.userCancelled) {
+  if (result.permissionRequired || result.error || result.denied || result.userCancelled) {
     return null;
   }
-  if (tool.name === "deploy_agent" && result.deployed) {
+  const name = tool.name || "";
+  if (name === "deploy_agent" && result.deployed) {
     return "agents";
   }
   if (Array.isArray(result.todos)) {
     return "todos";
   }
-  if (tool.name === "run_command" && result.exitCode !== undefined) {
+  if (name === "run_command" && (result.running || result.exitCode !== undefined)) {
     return "commands";
   }
-  if ((tool.name === "read_file" || tool.name === "get_file_outline") && result.path) {
+  if ((name === "read_file" || name === "get_file_outline") && (result.running || result.path)) {
     return "reads";
   }
-  if ((tool.name || "").startsWith("mcp__") || result.mcp) {
+  if (name.startsWith("mcp__") || result.mcp) {
     return "mcp";
   }
-  if (tool.name === "grep_files") {
+  if (name === "grep_files") {
     return "searches";
   }
-  if ((tool.name || "").startsWith("browser_")) {
+  if (name.startsWith("browser_")) {
     return "browser";
   }
   return null;
@@ -6354,7 +6359,8 @@ const ClusterRow = ({ tool }) => {
   const label = clusterRowLabel(tool);
   const meta = clusterRowMeta(tool);
   const diff = isEditTool(tool) ? result.diff : null;
-  const hasBody = Boolean(diff || (Array.isArray(result.matches) && result.matches.length) || result.content || result.stdout || result.stderr);
+  const runningArgs = (result.running && !result.command && tool.args && Object.keys(tool.args).length) ? JSON.stringify(tool.args, null, 2) : "";
+  const hasBody = Boolean(diff || (Array.isArray(result.matches) && result.matches.length) || result.content || result.stdout || result.stderr || runningArgs);
   if (!hasBody) {
     return (
       <div className="cluster-row-flat">
@@ -6382,6 +6388,7 @@ const ClusterRow = ({ tool }) => {
         {!diff && result.content && <PreBlock text={result.content} />}
         {!diff && result.stdout && <PreBlock text={result.stdout} />}
         {!diff && result.stderr && <PreBlock text={result.stderr} className="stderr" />}
+        {Boolean(runningArgs) && <PreBlock text={runningArgs} />}
       </div>
     </details>
   );
@@ -6404,13 +6411,14 @@ const CommandGroup = ({ tools, kind }) => {
   const ranges = kind === "reads" && readFiles === 1
     ? tools.map((tool) => clusterRowMeta(tool)).filter(Boolean).join(", ")
     : "";
+  const running = tools.some((tool) => tool.result?.running);
   return (
     <details className="cmd-group">
       <summary>
         <span className="step-marker"><Icon size={14} /></span>
         <span>{label}</span>
         {Boolean(ranges) && <span className="cmd-group-meta">{ranges}</span>}
-        <ChevronRight size={13} className="edit-chevron" />
+        {running ? <LoaderIcon size={12} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
       </summary>
       <div className="cmd-group-body">
         {tools.map((tool, idx) => <ClusterRow tool={tool} key={tool.id || idx} />)}
@@ -6438,12 +6446,13 @@ const CombineGroup = ({ tools }) => {
     })
     .join(", ")
     .replace(/^./, (char) => char.toUpperCase());
+  const running = tools.some((tool) => tool.result?.running);
   return (
     <details className="cmd-group">
       <summary>
         <span className="step-marker"><CombineIcon size={14} /></span>
         <span>{label}</span>
-        <ChevronRight size={13} className="edit-chevron" />
+        {running ? <LoaderIcon size={12} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
       </summary>
       <div className="cmd-group-body">
         {tools.map((tool, idx) => <ClusterRow tool={tool} key={tool.id || idx} />)}
@@ -6678,6 +6687,26 @@ const LiveToolStep = ({ tool }) => {
       <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
       {tool.lines > 0 && <span className="live-lines live-label" data-shimmer-label={lines}>{lines}</span>}
     </div>
+  );
+};
+
+const COLLAPSED_MESSAGE_LINES = 10;
+
+const CollapsibleText = ({ text }) => {
+  const [open, setOpen] = useState(false);
+  const value = String(text ?? "");
+  const lines = value.split("\n");
+  if (lines.length <= COLLAPSED_MESSAGE_LINES) {
+    return <div className="message-text plain">{value}</div>;
+  }
+  return (
+    <>
+      <div className="message-text plain">{open ? value : lines.slice(0, COLLAPSED_MESSAGE_LINES).join("\n")}</div>
+      <button type="button" className={open ? "message-more is-open" : "message-more"} onClick={() => setOpen((current) => !current)}>
+        <ChevronRight size={13} className="message-more-chevron" />
+        <span>{open ? t("message.less") : t("message.more")}</span>
+      </button>
+    </>
   );
 };
 
@@ -7224,7 +7253,7 @@ const Message = ({ message, navId, onAcceptPlan, isLastUser, editing, onStartEdi
               ))}
             </div>
           )}
-          <div className="message-text plain">{message.content}</div>
+          <CollapsibleText text={message.content} />
         </div>
         <div className="user-actions">
           {message.createdAt && <span className="user-time">{formatMessageTime(message.createdAt)}</span>}

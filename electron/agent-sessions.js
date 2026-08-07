@@ -563,6 +563,20 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     return false;
   };
 
+  const markNotificationDelivered = async (runId) => {
+    for (const session of sessions.values()) {
+      const run = session.runs.find((entry) => entry.id === String(runId || ""));
+      if (!run || run.notificationState === "delivered") {
+        continue;
+      }
+      run.notificationState = "delivered";
+      session.updatedAt = new Date().toISOString();
+      await persist();
+      return true;
+    }
+    return false;
+  };
+
   const clearFinished = async (chatId) => {
     let removed = 0;
     for (const session of sessions.values()) {
@@ -643,6 +657,7 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
     getTranscript,
     claimPending,
     settleNotification,
+    markNotificationDelivered,
     clearFinished,
     deleteChat,
     shutdown,

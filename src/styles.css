@@ -2649,6 +2649,34 @@ textarea {
   white-space: pre-wrap;
 }
 
+.message-more {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.message-more:hover {
+  color: var(--text);
+}
+
+.message-more-chevron {
+  flex: none;
+  transition: transform .18s var(--ease);
+}
+
+.message-more.is-open .message-more-chevron {
+  transform: rotate(90deg);
+}
+
 .user-surface {
   display: inline-block;
   max-width: min(100%, 620px);
@@ -4465,6 +4493,14 @@ textarea {
 }
 
 .cmd-group-meta + .edit-chevron {
+  margin-left: 8px;
+}
+
+.cmd-group > summary > .running-spinner {
+  margin-left: auto;
+}
+
+.cmd-group > summary > .cmd-group-meta + .running-spinner {
   margin-left: 8px;
 }
 

@@ -5033,10 +5033,12 @@ const runAgentStream = async (payload, sender) => {
           contextTracker?.commit();
           emit({ type: "steer", text: steer.text, steerId: steer.id });
         }
+        const injectedReportRuns = [];
         for (const done of takeAgentReports(payload.requestId)) {
           const seconds = Math.max(1, Math.round((done.durationMs || 0) / 1000));
           const files = done.writtenFiles.length ? ` Files it wrote: ${done.writtenFiles.slice(0, 20).join(", ")}.` : "";
           await refreshReadCacheForPaths(done.writtenFiles);
+          injectedReportRuns.push(done.runId);
           messages.push({ role: "user", content: `[INTERNAL APP EVENT, not a user message] Your sub-agent "${done.name}" (${done.agentId}) finished with status ${done.status} after ${seconds}s.${files} Its final report follows. The user has not seen it: use it to continue the work and surface what matters in your visible answer.\n\nREPORT:\n${done.report.slice(0, 12000) || "(empty report)"}` });
           contextTracker?.commit();
           const reportEvent = { id: `agent-report-${done.runId}`, name: "get_agent_status", args: {}, result: { agentStatus: true, agentId: done.agentId, name: done.name, status: done.status, running: false, runtimeSeconds: seconds, report: capTranscriptText(done.report, 8000) } };
@@ -5079,6 +5081,9 @@ const runAgentStream = async (payload, sender) => {
             throw new Error(`${providerName} returned a temporary error (${providerErr[1]}) and automatic retries did not clear it. This is a provider-side hiccup, not your project or the code. Try again in a moment, or switch model.`);
           }
           throw error;
+        }
+        for (const runId of injectedReportRuns) {
+          await agentSessionManager.markNotificationDelivered(runId).catch(() => {});
         }
         if (message.content) {
           finalText += message.content;
