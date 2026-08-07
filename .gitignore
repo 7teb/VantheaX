@@ -2,6 +2,7 @@ node_modules/
 dist/
 outputs/
 work/
+.claude/
 
 *.log
 *.tmp

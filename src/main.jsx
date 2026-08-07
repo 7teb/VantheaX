@@ -121,7 +121,7 @@ const STRINGS = {
     "planBlock.title": "Blocked by plan mode ({tool})",
     "planBlock.withPlan": "Plan mode is read-only, so nothing was changed. Accept the plan above to start the work, or switch plan mode off in the + menu.",
     "planBlock.noPlan": "Plan mode is read-only, so nothing was changed. Let it present a plan you can accept, or switch plan mode off in the + menu.",
-    "work.workingSince": "Working for {s}s",
+    "work.workingSince": "Working for {time}",
     "work.worked": "Worked {time}",
     "edit.oneFile": "1 file edited",
     "edit.nFiles": "{n} files edited",
@@ -584,7 +584,7 @@ const STRINGS = {
     "planBlock.title": "Vom Planmodus blockiert ({tool})",
     "planBlock.withPlan": "Der Planmodus ist read-only, es wurde nichts geändert. Nimm den Plan oben an, damit die Arbeit startet, oder schalte den Planmodus im +-Menü aus.",
     "planBlock.noPlan": "Der Planmodus ist read-only, es wurde nichts geändert. Lass erst einen Plan präsentieren, den du annehmen kannst, oder schalte den Planmodus im +-Menü aus.",
-    "work.workingSince": "In Arbeit seit {s}s",
+    "work.workingSince": "In Arbeit seit {time}",
     "work.worked": "{time} gearbeitet",
     "edit.oneFile": "1 Datei bearbeitet",
     "edit.nFiles": "{n} Dateien bearbeitet",
@@ -2809,7 +2809,7 @@ const App = () => {
     await refreshProject(pathValue);
     const saved = await api.getSettings();
     setSettings(saved);
-    if (activeChat?.messagesLoaded !== false) {
+    if (activeChat && activeChat.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
     setActiveChatId("");
@@ -2827,7 +2827,7 @@ const App = () => {
     await refreshProject(pathValue);
     const saved = await api.getSettings();
     setSettings(saved);
-    if (activeChat?.messagesLoaded !== false) {
+    if (activeChat && activeChat.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
     setActiveChatId("");
@@ -2842,7 +2842,7 @@ const App = () => {
   };
 
   const openProjectRoot = async (pathValue) => {
-    if (activeChat?.messagesLoaded !== false) {
+    if (activeChat && activeChat.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
     setActiveChatId("");
@@ -3001,7 +3001,7 @@ const App = () => {
   }, [resendText, busy]);
 
   const newChat = async () => {
-    if (activeChat?.messagesLoaded !== false) {
+    if (activeChat && activeChat.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
     followBottom = true;
@@ -3081,7 +3081,7 @@ const App = () => {
   }, [chats, activeChatId, projectPath]);
 
   const openChat = async (chat) => {
-    if (activeChat?.id !== chat.id && activeChat?.messagesLoaded !== false) {
+    if (activeChat && activeChat.id !== chat.id && activeChat.messagesLoaded !== false) {
       await api.saveChat(activeChat).catch(() => {});
     }
     const loaded = chat.messagesLoaded === false ? restoreStoredChat(await api.loadChat(chat.id)) : chat;
@@ -7083,7 +7083,7 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan, onIm
     <details ref={detailsRef} className={working ? "worklog is-working" : "worklog"}>
       <summary className={working ? "worklog-head is-working" : "worklog-head"}>
         {working
-          ? <span className="live-label" data-shimmer-label={t("work.workingSince", { s: elapsed })}>{t("work.workingSince", { s: elapsed })}</span>
+          ? <span className="live-label" data-shimmer-label={t("work.workingSince", { time: formatWorkTime(elapsed * 1000) })}>{t("work.workingSince", { time: formatWorkTime(elapsed * 1000) })}</span>
           : <span>{t("work.worked", { time: formatWorkTime(workMs) })}</span>}
         {!working && <ChevronRight size={14} className="worklog-chevron" />}
       </summary>
