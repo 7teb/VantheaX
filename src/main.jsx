@@ -126,6 +126,7 @@ const STRINGS = {
     "edit.oneFile": "1 file edited",
     "edit.nFiles": "{n} files edited",
     "cluster.commands": "Ran {n} commands",
+    "cluster.agents": "Deployed {n} agents",
     "cluster.oneRead": "Read 1 file",
     "cluster.reads": "Read {n} files",
     "cluster.mcp": "Ran {n} MCP commands",
@@ -145,9 +146,13 @@ const STRINGS = {
     "combine.edits.other": "edited {n} files",
     "combine.todos.one": "updated todos",
     "combine.todos.other": "updated todos {n}x",
+    "combine.agents.one": "deployed {n} agent",
+    "combine.agents.other": "deployed {n} agents",
     "row.read": "Read {x}",
     "row.edited": "Edited {x}",
     "row.searched": "Searched {x}",
+    "row.deployedAgent": "Deployed agent {x}",
+    "tool.cancelled": "Cancelled when you stopped the turn",
     "todo.tasks": "Tasks",
     "todo.none": "No tasks yet",
     "todo.goal": "Goal",
@@ -582,6 +587,7 @@ const STRINGS = {
     "edit.oneFile": "1 Datei bearbeitet",
     "edit.nFiles": "{n} Dateien bearbeitet",
     "cluster.commands": "{n} Befehle ausgeführt",
+    "cluster.agents": "{n} Agenten deployed",
     "cluster.oneRead": "1 Datei gelesen",
     "cluster.reads": "{n} Dateien gelesen",
     "cluster.mcp": "{n} MCP-Befehle ausgeführt",
@@ -601,8 +607,12 @@ const STRINGS = {
     "combine.edits.other": "{n} Dateien bearbeitet",
     "combine.todos.one": "To-dos aktualisiert",
     "combine.todos.other": "To-dos {n}x aktualisiert",
+    "combine.agents.one": "{n} Agent deployed",
+    "combine.agents.other": "{n} Agenten deployed",
     "row.read": "{x} gelesen",
     "row.edited": "{x} bearbeitet",
+    "row.deployedAgent": "Agent {x} deployed",
+    "tool.cancelled": "Abgebrochen, als du den Turn gestoppt hast",
     "row.searched": "{x} durchsucht",
     "todo.tasks": "Aufgaben",
     "todo.none": "Noch keine Aufgaben",
@@ -2493,6 +2503,7 @@ const App = () => {
       storedChats = storedChats.map(restoreStoredChat);
       setSettings(loadedSettings);
       setModels(loadedModels);
+      setModelLabels(loadedModels);
       setChats(storedChats);
       chatsLoadedRef.current = true;
       const initialChat = storedChats.find((chat) => chat.id === storedActive) || storedChats[0] || null;
@@ -4459,9 +4470,15 @@ const compactModelName = (model) => {
   return model.label;
 };
 
-const EFFORT_LABEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Max", max: "Max", none: "Off", off: "Off", on: "On", disabled: "Off", adaptive: "Adaptive", enabled: "On" };
-const EFFORT_LABEL_DE = { minimal: "Minimal", low: "Niedrig", medium: "Mittel", high: "Hoch", xhigh: "Max", max: "Max", none: "Aus", off: "Aus", on: "An", disabled: "Aus", adaptive: "Adaptiv", enabled: "An" };
+const EFFORT_LABEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Max", max: "Max", major: "Major", none: "Off", off: "Off", on: "On", disabled: "Off", adaptive: "Adaptive", enabled: "On" };
+const EFFORT_LABEL_DE = { minimal: "Minimal", low: "Niedrig", medium: "Mittel", high: "Hoch", xhigh: "Max", max: "Max", major: "Major", none: "Aus", off: "Aus", on: "An", disabled: "Aus", adaptive: "Adaptiv", enabled: "An" };
 const effortLabel = (value) => ((LANG === "de" ? EFFORT_LABEL_DE : EFFORT_LABEL)[value] || value || "");
+
+let MODEL_LABELS = new Map();
+const setModelLabels = (list) => {
+  MODEL_LABELS = new Map((Array.isArray(list) ? list : []).map((entry) => [entry.id, entry.label || entry.id]));
+};
+const modelLabel = (id) => MODEL_LABELS.get(String(id || "")) || String(id || "");
 
 const turnIdForMessage = (message, index) => String(message?.id || message?.createdAt || `turn-${index}`);
 
@@ -4666,9 +4683,11 @@ const EffortSlider = ({ efforts, value, onChange }) => {
   const safeEfforts = efforts?.length ? efforts : [value || "high"];
   const selectedIndex = Math.max(0, safeEfforts.indexOf(value));
   const progress = safeEfforts.length > 1 ? selectedIndex / (safeEfforts.length - 1) * 100 : 100;
-  const isMax = selectedIndex === safeEfforts.length - 1;
+  const majorIndex = safeEfforts.indexOf("major");
+  const isMajor = majorIndex >= 0 && selectedIndex === majorIndex;
+  const isMax = !isMajor && selectedIndex === (majorIndex >= 0 ? majorIndex - 1 : safeEfforts.length - 1);
   return (
-    <div className={isMax ? "effort-slider is-max" : "effort-slider"}>
+    <div className={isMajor ? "effort-slider is-major" : (isMax ? "effort-slider is-max" : "effort-slider")}>
       <div className="effort-slider-caption">
         <span>{t("model.effort")}</span>
         <strong>{effortLabel(safeEfforts[selectedIndex])}</strong>
@@ -4676,9 +4695,9 @@ const EffortSlider = ({ efforts, value, onChange }) => {
       <div className="effort-slider-control" style={{ "--effort-progress": `${progress}%` }}>
         <div className="effort-slider-rail" />
         <div className="effort-slider-fill" />
-        {isMax && (
+        {(isMax || isMajor) && (
           <div className="effort-slider-particles">
-            {Array.from({ length: 12 }, (_, index) => <i key={index} style={{ "--particle-index": index }} />)}
+            {Array.from({ length: isMajor ? 54 : 12 }, (_, index) => <i key={index} style={{ "--particle-index": index }} />)}
           </div>
         )}
         <div className="effort-slider-stops">
@@ -5242,6 +5261,12 @@ const ListTreeIcon = ({ size = 24, ...rest }) => (
 const LayoutDashboardIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" />
+  </svg>
+);
+
+const BotIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" />
   </svg>
 );
 
@@ -6109,8 +6134,11 @@ const clusterKind = (tool) => {
     return "edits";
   }
   const result = tool.result || {};
-  if (result.running || result.permissionRequired || result.error || result.denied) {
+  if (result.running || result.permissionRequired || result.error || result.denied || result.userCancelled) {
     return null;
+  }
+  if (tool.name === "deploy_agent" && result.deployed) {
+    return "agents";
   }
   if (Array.isArray(result.todos)) {
     return "todos";
@@ -6147,7 +6175,7 @@ const groupWorkSegments = (segments) => {
       continue;
     }
     const tool = seg.tool;
-    if (tool?.result?.plan) {
+    if (tool?.result?.plan || tool?.result?.planDeferred) {
       continue;
     }
     if (tool?.result?.planBlocked) {
@@ -6283,6 +6311,9 @@ const clusterRowLabel = (tool) => {
   if (name === "grep_files") {
     return t("row.searched", { x: tool.args?.query || result.query || "" });
   }
+  if (name === "deploy_agent" && result.agent) {
+    return t("row.deployedAgent", { x: modelLabel(result.model) });
+  }
   if (name === "run_command") {
     return result.command || tool.args?.command || getToolLabel(tool);
   }
@@ -6298,6 +6329,9 @@ const clusterRowMeta = (tool) => {
   }
   if (name === "grep_files" && Array.isArray(result.matches)) {
     return grepResultMeta(result);
+  }
+  if (name === "deploy_agent" && result.name) {
+    return result.name;
   }
   if (name === "read_file") {
     const start = Number(result.startLine ?? tool.args?.start_line) || 0;
@@ -6354,7 +6388,7 @@ const ClusterRow = ({ tool }) => {
 };
 
 const CommandGroup = ({ tools, kind }) => {
-  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : FolderSearchIcon;
+  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : kind === "agents" ? BotIcon : FolderSearchIcon;
   const readFiles = clusterFileCount(tools) || tools.length;
   const label = kind === "commands"
     ? t("cluster.commands", { n: tools.length })
@@ -6364,7 +6398,9 @@ const CommandGroup = ({ tools, kind }) => {
         ? t("cluster.searches", { n: tools.length })
         : kind === "browser"
           ? t("cluster.browser", { n: tools.length })
-          : (readFiles === 1 ? t("cluster.oneRead") : t("cluster.reads", { n: readFiles }));
+          : kind === "agents"
+            ? t("cluster.agents", { n: tools.length })
+            : (readFiles === 1 ? t("cluster.oneRead") : t("cluster.reads", { n: readFiles }));
   const ranges = kind === "reads" && readFiles === 1
     ? tools.map((tool) => clusterRowMeta(tool)).filter(Boolean).join(", ")
     : "";
@@ -6588,7 +6624,7 @@ const ToolStep = ({ tool }) => {
     );
   }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
-  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.maxOutputError);
+  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || result.userCancelled || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.maxOutputError);
   return (
     <details className={`${needsPermission ? "tool-step permission" : ((result.error || result.maxOutputError) ? "tool-step failed" : "tool-step")}${isMemory ? " memory" : ""}`}>
       <summary>
@@ -6601,6 +6637,7 @@ const ToolStep = ({ tool }) => {
         {result.error && <div className="tool-warning">{result.error}</div>}
         {result.reason && <div className="tool-warning">{result.reason}</div>}
         {result.denied && <div className="tool-warning">{result.note || t("tool.denied")}</div>}
+        {result.userCancelled && <div className="tool-warning">{t("tool.cancelled")}</div>}
         {Array.isArray(result.matches) && (result.matches.length
           ? <>
               {result.regexFallback && <div className="tool-meta">{t("grep.fallback")}</div>}

@@ -928,7 +928,7 @@ const getFileOutline = async (projectPath, relativePath) => {
   return { path: file.path, outline: outline.slice(0, 120) };
 };
 
-const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData, budget = null) => {
+const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData, budget = null, signal = null) => {
   const catastrophic = commandIsCatastrophic(command);
   if (catastrophic) {
     throw new Error(`Catastrophic command permanently blocked: ${catastrophic}. This cannot be overridden in the app, run it yourself in a real terminal if you truly intend it.`);
@@ -988,8 +988,22 @@ const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData, bu
       stderr += data.toString();
       emitProgress(false);
     });
+    const onAbort = () => {
+      clearTimeout(timer);
+      killProcessTree(child.pid);
+      resolve({
+        command,
+        cwd: path.relative(root, target) || ".",
+        exitCode: null,
+        durationMs: Date.now() - started,
+        stdout: truncateText(stripAnsi(stdout)),
+        stderr: truncateText(stripAnsi(stderr)),
+        userCancelled: true,
+      });
+    };
     child.on("close", (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       resolve({
         command,
         cwd: path.relative(root, target) || ".",
@@ -1000,6 +1014,11 @@ const runCommand = async (projectPath, command, cwd = ".", timeoutMs, onData, bu
         timedOut: false,
       });
     });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 };
 
@@ -2267,6 +2286,68 @@ const takeAgentReports = (requestId) => {
   return list;
 };
 
+const openAgentRuns = new Map();
+const agentRunWaiters = new Map();
+
+const markAgentRunOpen = (requestId, runId) => {
+  const id = String(requestId || "");
+  if (!id || !runId) {
+    return;
+  }
+  const open = openAgentRuns.get(id) || new Set();
+  open.add(runId);
+  openAgentRuns.set(id, open);
+};
+
+const wakeAgentWaiters = (requestId) => {
+  const waiters = agentRunWaiters.get(String(requestId || ""));
+  if (!waiters) {
+    return;
+  }
+  agentRunWaiters.delete(String(requestId || ""));
+  for (const wake of waiters) {
+    wake();
+  }
+};
+
+const markAgentRunClosed = (requestId, runId) => {
+  const id = String(requestId || "");
+  const open = openAgentRuns.get(id);
+  if (open) {
+    open.delete(runId);
+    if (!open.size) {
+      openAgentRuns.delete(id);
+    }
+  }
+  wakeAgentWaiters(id);
+};
+
+const hasOpenAgentRuns = (requestId) => Boolean(openAgentRuns.get(String(requestId || ""))?.size);
+
+const hasUnreadAgentWork = (requestId) => hasOpenAgentRuns(requestId) || Boolean((pendingAgentReports.get(requestId) || []).length);
+
+const forgetAgentRuns = (requestId) => {
+  openAgentRuns.delete(String(requestId || ""));
+  wakeAgentWaiters(requestId);
+};
+
+const waitForAgentRun = (requestId, signal) => new Promise((resolve) => {
+  const id = String(requestId || "");
+  if (signal?.aborted || !hasOpenAgentRuns(id)) {
+    resolve();
+    return;
+  }
+  const waiters = agentRunWaiters.get(id) || new Set();
+  const wake = () => {
+    waiters.delete(wake);
+    signal?.removeEventListener("abort", wake);
+    resolve();
+  };
+  waiters.add(wake);
+  agentRunWaiters.set(id, waiters);
+  signal?.addEventListener("abort", wake, { once: true });
+});
+
 const resolvePermission = (callId, payload) => {
   const pending = pendingPermissions.get(callId);
   if (!pending) {
@@ -2310,7 +2391,7 @@ const executeApprovedTool = async (projectPath, result, onProgress, runtime = {}
       if (onProgress) {
         onProgress({ command: result.command, stdout: out, stderr: err });
       }
-    }, runtime.commandBudget);
+    }, runtime.commandBudget, runtime.signal);
   }
   return { error: "Nothing to execute after approval" };
 };
@@ -2859,9 +2940,10 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
     }
     budget.count += 1;
     if (planMode && name === "deploy_agent" && args.profile !== "explore") {
+      budget.count -= 1;
       return { error: "Plan mode only allows read-only explore agents." };
     }
-    return await runDelegatedAgent({
+    const delegated = await runDelegatedAgent({
       action: name === "continue_agent" ? "continue" : "deploy",
       args,
       projectPath,
@@ -2876,8 +2958,15 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       onProgress,
       payload: runtime.payload || {},
     });
+    if (!delegated?.agent) {
+      budget.count -= 1;
+    }
+    return delegated;
   }
   if (name === "present_plan") {
+    if (runtime.payload?.effort === majorEffort && (runtime.agentCallsThisRound || hasUnreadAgentWork(runtime.payload?.requestId))) {
+      return { planDeferred: true, note: "You called agents in this same response or agent work of yours is still outstanding, so no plan was presented to the user. Wait until every report is actually in your context, then call present_plan exactly once with the final plan that accounts for what they found. Do not present a plan the agents could still invalidate." };
+    }
     return { plan: { summary: args.summary || "", keyChanges: args.key_changes || [], testPlan: args.test_plan || [], assumptions: args.assumptions || [], filesToChange: args.files_to_change || [], riskLevel: args.risk_level || "", requiresCommands: Boolean(args.requires_commands) } };
   }
   if (name === "submit_result") {
@@ -3123,7 +3212,7 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       if (onProgress) {
         onProgress({ command: args.command, stdout: out, stderr: err });
       }
-    }, runtime.commandBudget);
+    }, runtime.commandBudget, runtime.signal);
   }
   if (name === "start_background_task") {
     const command = String(args.command || "").trim();
@@ -3376,6 +3465,11 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     lines.push(section("extended_thinking", "For genuinely LARGE work you may take an extra reasoning pass before starting, with the continue_thinking tool. Use it when the task is designing a whole game, a whole framework or system architecture, a large multi-file refactor, or a real implementation plan, and whenever the user explicitly asks you to think longer or plan it out first. Do NOT use it for a small script, a few bug fixes, a single-file change, a question, or anything you can already start on: reaching for it on small work wastes the user's time. The shape is always the same: write ONE short sentence to the user saying you can do it and are going to think it through, then call continue_thinking in that SAME response with a concrete focus. It executes nothing and reads nothing, it only buys you another full round to plan in, and it shows the user 'Extended thinking' so a long pause does not look like a crash. Use the extra round properly (structure, the pieces and how they fit, the build order, what could go wrong), then do the work. It is capped per turn, never call it twice in a row, and never use it to stall instead of working. In plan mode it does not replace present_plan: think first if the design is large, then still present the plan with present_plan."));
     lines.push(section("subagents", "You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Profile choice is about reach as well as safety: explore's tools cannot leave the open project folder, so an agent that must inspect any external path needs worker, because only run_command reaches it, even for a read-only investigation. Deploy and continue calls return immediately after launch, so you can launch multiple useful agents or continue other independent work without waiting. Never poll in a waiting loop: while your turn is still running, the app automatically injects an internal event with the final report the moment an agent finishes. If your turn ends before that, the report waits in the agent session; check it with get_agent_status at the start of your next turn instead of redeploying. Sub-agents cannot talk to the user or deploy agents themselves.",
       Array.isArray(payload.agentModels) && payload.agentModels.length ? `Available agent models in the current UI: ${payload.agentModels.join(", ")}.` : ""));
+    if (payload.effort === majorEffort) {
+      lines.push(section("major_mode",
+        "MAJOR MODE IS ON. The user deliberately picked Major, the highest step of the effort slider, for this turn. It does two things: you run at the model's maximum reasoning effort, and you delegate aggressively. The restraint in the subagents block above is relaxed for exactly this mode: there, delegation must earn its place; here, delegation IS the default shape of your work. Whenever a task splits into two or more parts that do not depend on each other, deploy one agent per part in a SINGLE response so they run in parallel, and do that even for parts you could have handled yourself in a few tool calls. The runtime allows at most FOUR agents running at the same time and at most EIGHT agent runs in one main turn: if the work splits into more independent parts than that, start the first four and launch the next ones as slots free up, do not fire off more than four at once and expect them to queue. Your turn does not end while agents you started are still running, and each report is injected the moment that agent finishes, so keep working or wait for them, and write your final synthesis only after the last one is back. Concretely: several files or subsystems to inspect, several independent questions, a sweep across the repo, several unrelated edits, an investigation running next to a build. Four agents finishing in thirty seconds is the point of this mode; doing the same work yourself in five sequential minutes is the failure the user turned this mode on to avoid, and they should visibly see agents being used. Still do not deploy for a single lookup, a single small edit, or a chain where every step depends on the previous one, and never deploy to avoid working: you stay responsible for the result, you read every report, and you do the synthesis yourself.",
+        "AGENT MODEL COST RULE. These four models are expensive and you may NOT start or continue any agent run on them without the user's explicit approval first: moonshotai/kimi-k3, openai/gpt-5.6-sol, anthropic/claude-sonnet-5, anthropic/claude-opus-5. That covers deploy_agent and continue_agent alike, including switching an existing agent session onto one of them through continue_agent's model argument. If one of them is genuinely right for a job, say in one sentence which model, which job, and why, then wait for the user's answer before starting that run. Every other model in the agent list you use freely without asking. Never use NVIDIA endpoint models for agents, that endpoint is often switched off. When in doubt take the cheaper model: the point of this mode is many parallel agents, not four expensive ones."));
+    }
   }
   lines.push(section("mid_turn_messages", "The user can send you a message WHILE you are already working on a turn. It arrives in your context as a user message marked as sent mid-turn. When that happens you must actually respond to them, not just quietly obey it: in your very next output, before the next tool call, write one or two plain sentences answering what they said and stating what it changes about what you are doing. Answering only inside your private reasoning does not count, the user cannot see that. Then carry on with the work, a mid-turn message does NOT end the turn and is not a reason to stop, summarize, or hand back control. If it contradicts what you are doing, follow the newer message and say so."));
   if ((payload.fileAttachments || []).length) {
@@ -3431,14 +3525,24 @@ const contextBudget = 512000;
 
 let modelCatalogCache = null;
 
+const majorEffort = "major";
+
 const modelCatalog = async () => {
   if (!modelCatalogCache) {
     const list = await readJson(path.join(rootDir, "config", "models.json"), []);
     if (Array.isArray(list) && list.length) {
-      modelCatalogCache = list;
+      modelCatalogCache = list.map((entry) => (entry.efforts?.length ? { ...entry, efforts: [...entry.efforts, majorEffort] } : entry));
     }
   }
   return modelCatalogCache || [];
+};
+
+const apiEffort = (entry, effort) => {
+  if (effort !== majorEffort) {
+    return effort;
+  }
+  const real = (entry?.efforts || []).filter((item) => item !== majorEffort);
+  return real[real.length - 1] || entry?.defaultEffort || "";
 };
 
 const catalogEntry = async (modelId) => (await modelCatalog()).find((item) => item.id === modelId) || null;
@@ -3464,7 +3568,8 @@ const nvidiaBody = (entry, settings, effort, messages, tools) => {
     body.tools = tools;
     body.tool_choice = "auto";
   }
-  const chosen = (entry.efforts || []).includes(effort) ? effort : entry.defaultEffort;
+  const requested = apiEffort(entry, effort);
+  const chosen = (entry.efforts || []).includes(requested) ? requested : entry.defaultEffort;
   const fragment = entry.effortMap?.[chosen];
   if (fragment) {
     for (const [field, value] of Object.entries(fragment)) {
@@ -3481,8 +3586,9 @@ const nvidiaBody = (entry, settings, effort, messages, tools) => {
 
 const openRouterBody = (entry, model, effort, messages, tools) => {
   const body = { model, messages, tools, tool_choice: "auto", temperature: 0.2 };
-  if (effort && (entry?.efforts || []).length) {
-    body.reasoning = { effort };
+  const resolved = apiEffort(entry, effort);
+  if (resolved && (entry?.efforts || []).length) {
+    body.reasoning = { effort: resolved };
   }
   if ((entry?.providerOrder || []).length) {
     body.provider = { order: entry.providerOrder, allow_fallbacks: false };
@@ -4724,6 +4830,7 @@ const runDelegatedAgent = async (options) => {
   }
   const { session, run } = outcome.value;
   const requestId = options.payload?.requestId || "";
+  markAgentRunOpen(requestId, run.id);
   task.then((value) => {
     queueAgentReport(requestId, {
       agentId: session.id,
@@ -4734,6 +4841,7 @@ const runDelegatedAgent = async (options) => {
       report: String(value?.report || ""),
       writtenFiles: Array.isArray(value?.writtenFiles) ? value.writtenFiles : [],
     });
+    markAgentRunClosed(requestId, run.id);
   }, () => {});
   task.catch(async (error) => {
     agentSessionManager?.addEntry(session.id, run.id, { type: "error", text: String(error?.message || error) });
@@ -4746,6 +4854,7 @@ const runDelegatedAgent = async (options) => {
       report: `Agent failed: ${String(error?.message || error).slice(0, 1000)}`,
       writtenFiles: [],
     });
+    markAgentRunClosed(requestId, run.id);
     await agentSessionManager?.finish(session.id, run.id, {
       status: "failed",
       report: `Agent failed: ${String(error?.message || error).slice(0, 1000)}`,
@@ -4857,7 +4966,7 @@ const runAgentStream = async (payload, sender) => {
   const settings = await readSettings();
   Object.assign(payload, await personalizationFields(settings));
   payload.agentModels = (await modelCatalog())
-    .filter((entry) => entry.apiProvider !== "nvidia" || settings.nvidia?.enabled)
+    .filter((entry) => entry.apiProvider !== "nvidia")
     .map((entry) => `${entry.id} (${entry.label})`);
   const modelEntry = await catalogEntry(payload.model);
   if (modelEntry?.apiProvider === "nvidia" && !settings.nvidia?.enabled) {
@@ -4906,7 +5015,7 @@ const runAgentStream = async (payload, sender) => {
     const visualContext = (Array.isArray(payload.visualContext) ? payload.visualContext : []).map((v) => String(v || "")).filter(Boolean).slice(-6);
     const tools = [];
     commandCount = 0;
-    const runtime = { depth: 0, payload, deployments: { count: 0 }, commandBudget: { count: 0 } };
+    const runtime = { depth: 0, payload, deployments: { count: 0 }, commandBudget: { count: 0 }, signal: controller.signal };
     let finalText = "";
     let lastFinish = "";
     let overflowCount = 0;
@@ -4992,6 +5101,10 @@ const runAgentStream = async (payload, sender) => {
           if ((pendingInjections.get(payload.requestId) || []).length || (pendingAgentReports.get(payload.requestId) || []).length) {
             continue;
           }
+          if (payload.effort === majorEffort && hasOpenAgentRuns(payload.requestId)) {
+            await waitForAgentRun(payload.requestId, controller.signal);
+            continue;
+          }
           if (message.finishReason === "length" && round < maxToolRounds - 1) {
             overflowCount += 1;
             const hadContent = Boolean((message.content || "").trim());
@@ -5065,6 +5178,8 @@ const runAgentStream = async (payload, sender) => {
           }
           return { call, callArgs, onProgress, result };
         };
+        let planDeferred = false;
+        runtime.agentCallsThisRound = toolCalls.some((call) => call.function.name === "deploy_agent" || call.function.name === "continue_agent");
         for (let callIndex = 0; callIndex < toolCalls.length; callIndex += 1) {
           const call = toolCalls[callIndex];
           if (call.function.name === "deploy_agent" || call.function.name === "continue_agent") {
@@ -5089,6 +5204,9 @@ const runAgentStream = async (payload, sender) => {
           const executed = await runCall(call);
           let result = executed.result;
           const { callArgs, onProgress } = executed;
+          if (controller.signal.aborted && !result?.permissionRequired) {
+            result = { ...(result && typeof result === "object" ? result : {}), userCancelled: true, note: "The user stopped this turn while this tool call was still running, so it was cancelled and produced no usable result. Do not assume it succeeded and do not silently retry it. Read what the user says next and follow that instead." };
+          }
           if (result?.permissionRequired) {
             if (controller.signal.aborted) {
               cancelPendingWrite(result);
@@ -5152,6 +5270,9 @@ const runAgentStream = async (payload, sender) => {
           if (payload.planMode && call.function.name === "present_plan" && result?.plan) {
             planPresented = true;
           }
+          if (result?.planDeferred) {
+            planDeferred = true;
+          }
           const toolEvent = { id: call.id, name: call.function.name, args: callArgs, result };
           const hidden = call.function.name === "continue_thinking" || call.function.name === "read_attachment";
           if (!hidden) {
@@ -5165,6 +5286,10 @@ const runAgentStream = async (payload, sender) => {
         if (submitted || planPresented) {
           break;
         }
+        if (planDeferred && payload.effort === majorEffort && hasOpenAgentRuns(payload.requestId)) {
+          await waitForAgentRun(payload.requestId, controller.signal);
+        }
+        runtime.agentCallsThisRound = false;
       }
       if (!goalActive || controller.signal.aborted || policyStop) {
         break;
@@ -5191,8 +5316,12 @@ const runAgentStream = async (payload, sender) => {
     const fallback = controller.signal.aborted ? finalText : (finalText || (planWasPresented || policy ? "" : `The model ended the turn without a final answer (finish reason: ${lastFinish || "unknown"}). It returned no text and no tool call I could run, it may have emitted a tool call in a format that could not be parsed. Try again, or switch model.`));
     const retainedPaths = mergeReadPaths(payload.readPaths, tools);
     const retainedFiles = await buildReadCache(projectPath, retainedPaths);
-    const retainedAssistant = controller.signal.aborted && fallback
-      ? `${fallback}\n\n[The user stopped this response before it finished.]`
+    const cancelledCalls = [...new Set(tools.filter((tool) => tool.result?.userCancelled).map((tool) => tool.name))];
+    const stopNote = cancelledCalls.length
+      ? `[The user stopped this response before it finished. These tool calls were cancelled while still running and returned no result: ${cancelledCalls.join(", ")}. Treat them as not done.]`
+      : "[The user stopped this response before it finished.]";
+    const retainedAssistant = controller.signal.aborted
+      ? [fallback, stopNote].filter(Boolean).join("\n\n")
       : fallback;
     const retainedHistory = [
       ...(payload.history || []),
@@ -5206,6 +5335,7 @@ const runAgentStream = async (payload, sender) => {
   } finally {
     pendingInjections.delete(payload.requestId);
     pendingAgentReports.delete(payload.requestId);
+    forgetAgentRuns(payload.requestId);
     contextTracker?.close();
     narrator.end();
   }
@@ -5967,6 +6097,7 @@ ipcMain.handle("agent:inject", (_, requestId, text, steerId) => {
   const list = pendingInjections.get(requestId) || [];
   list.push({ id: String(steerId || ""), text: clean });
   pendingInjections.set(requestId, list);
+  wakeAgentWaiters(requestId);
   return { ok: true };
 });
 ipcMain.handle("agent:cancel", (_, requestId) => {

@@ -3853,6 +3853,84 @@ textarea {
   height: 1px;
 }
 
+.effort-slider.is-major .effort-slider-caption strong {
+  color: #cba6ff;
+  text-shadow: 0 0 10px rgba(168, 85, 247, .55);
+}
+
+.effort-slider.is-major .effort-slider-fill {
+  background: linear-gradient(90deg, #3b1178, #7c3aed 42%, #a855f7 74%, #d8b4fe);
+  box-shadow: 0 0 12px rgba(168, 85, 247, .55), inset 0 0 6px rgba(216, 180, 254, .4);
+  animation: effort-major-pulse 2.4s ease-in-out infinite;
+}
+
+.effort-slider.is-major .effort-slider-thumb {
+  background: linear-gradient(180deg, #f3e8ff, #c084fc);
+  box-shadow: 0 0 14px rgba(168, 85, 247, .75), 0 1px 5px rgba(0, 0, 0, .42);
+}
+
+.effort-slider.is-major .effort-slider-particles i {
+  top: 4px;
+  width: 2px;
+  height: 2px;
+  background: #e9d5ff;
+  box-shadow: 0 0 5px rgba(192, 132, 252, .95);
+  animation-duration: calc(.85s + var(--particle-index) * .018s);
+  animation-delay: calc(var(--particle-index) * -.035s);
+}
+
+.effort-slider.is-major .effort-slider-particles i:nth-child(2n) {
+  top: 1px;
+  background: #c084fc;
+}
+
+.effort-slider.is-major .effort-slider-particles i:nth-child(3n) {
+  top: 7px;
+  width: 1px;
+  height: 1px;
+}
+
+.effort-slider.is-major .effort-slider-particles i:nth-child(4n) {
+  top: 2px;
+  width: 3px;
+  height: 3px;
+  background: #fff;
+}
+
+.effort-slider.is-major .effort-slider-particles i:nth-child(5n) {
+  top: 6px;
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: #a855f7;
+}
+
+.effort-slider.is-major .effort-slider-particles i:nth-child(7n) {
+  top: 3px;
+  width: 4px;
+  height: 1px;
+  border-radius: 1px;
+  background: #ddd6fe;
+}
+
+.effort-slider.is-major .effort-slider-particles i:nth-child(11n) {
+  top: 5px;
+  width: 3px;
+  height: 3px;
+  background: #f5d0fe;
+  box-shadow: 0 0 8px rgba(240, 171, 252, 1);
+}
+
+@keyframes effort-major-pulse {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(168, 85, 247, .55), inset 0 0 6px rgba(216, 180, 254, .4);
+  }
+
+  50% {
+    box-shadow: 0 0 18px rgba(192, 132, 252, .8), inset 0 0 9px rgba(233, 213, 255, .55);
+  }
+}
+
 @keyframes effort-particle-flow {
   0% {
     transform: translateX(0);
