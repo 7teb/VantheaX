@@ -514,7 +514,7 @@ class McpManager {
     if (!st || st.status !== "ready" || !st.client) {
       return { mcp: true, server, tool, isError: true, content: `[MCP tool error] server '${server}' is not connected` };
     }
-    const timeout = Math.min(600000, Math.max(1000, Number(timeoutMs) || 60000));
+    const timeout = Math.min(3600000, Math.max(1000, Number(timeoutMs) || 60000));
     try {
       const res = await withTimeout(st.client.callTool({ name: tool, arguments: args || {} }), timeout, () => {});
       const meta = st.tools.find((item) => item.name === tool);

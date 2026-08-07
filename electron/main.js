@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { spawn as spawnPty } from "node-pty";
 import { mcpManager, extractCommandArg, extractTargetScope, scopeKey, collectArgStrings } from "./mcp.js";
 import { createBackgroundTaskManager } from "./background-tasks.js";
-import { createAgentSessionManager } from "./agent-sessions.js";
+import { createAgentSessionManager, maxConcurrentAgents } from "./agent-sessions.js";
 import { createChatStore } from "./chat-store.js";
 import { readTextWindow } from "./text-window.js";
 import { configureBrowserHost, configureBrowserSession, registerBrowserGuestSecurity } from "./browser-guest.js";
@@ -35,19 +35,20 @@ const estimateTokens = (text) => {
 };
 const maxGrepMatches = 200;
 const maxGrepLineChars = 300;
-const maxToolRounds = 100;
-const maxExtendedThinking = 3;
-const maxCommands = 200;
+const maxToolRounds = 500;
+const maxExtendedThinking = 20;
+const maxCommands = 5000;
 const maxOutputBytes = 8 * 1024 * 1024;
 const toolResultMaxTokens = 25000;
-const maxGoalRounds = 12;
+const maxGoalRounds = 100;
 const defaultCommandTimeout = 30000;
-const maxCommandTimeout = 3600000;
+const maxCommandTimeout = 12 * 60 * 60 * 1000;
 const agentContextThreshold = Math.floor(512000 * 0.8);
 const agentContextEmergency = Math.floor(512000 * 0.92);
-const agentRuntimeLimit = 2 * 60 * 60 * 1000;
-const agentFirstTokenTimeout = 75000;
-const agentStreamIdleTimeout = 90000;
+const maxAgentRunsPerTurn = 200;
+const agentRuntimeLimit = 24 * 60 * 60 * 1000;
+const agentFirstTokenTimeout = 300000;
+const agentStreamIdleTimeout = 600000;
 let mainWindow = null;
 registerBrowserGuestSecurity(app, () => mainWindow);
 let backgroundTaskManager = null;
@@ -2935,8 +2936,8 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       return { error: "Sub-agents cannot deploy or continue other agents." };
     }
     const budget = runtime.deployments;
-    if (!budget || budget.count >= 8) {
-      return { error: "At most 8 agent runs can be started in one main turn." };
+    if (!budget || budget.count >= maxAgentRunsPerTurn) {
+      return { error: `At most ${maxAgentRunsPerTurn} agent runs can be started in one main turn.` };
     }
     budget.count += 1;
     if (planMode && name === "deploy_agent" && args.profile !== "explore") {
@@ -3467,7 +3468,7 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
       Array.isArray(payload.agentModels) && payload.agentModels.length ? `Available agent models in the current UI: ${payload.agentModels.join(", ")}.` : ""));
     if (payload.effort === majorEffort) {
       lines.push(section("major_mode",
-        "MAJOR MODE IS ON. The user deliberately picked Major, the highest step of the effort slider, for this turn. It does two things: you run at the model's maximum reasoning effort, and you delegate aggressively. The restraint in the subagents block above is relaxed for exactly this mode: there, delegation must earn its place; here, delegation IS the default shape of your work. Whenever a task splits into two or more parts that do not depend on each other, deploy one agent per part in a SINGLE response so they run in parallel, and do that even for parts you could have handled yourself in a few tool calls. The runtime allows at most FOUR agents running at the same time and at most EIGHT agent runs in one main turn: if the work splits into more independent parts than that, start the first four and launch the next ones as slots free up, do not fire off more than four at once and expect them to queue. Your turn does not end while agents you started are still running, and each report is injected the moment that agent finishes, so keep working or wait for them, and write your final synthesis only after the last one is back. Concretely: several files or subsystems to inspect, several independent questions, a sweep across the repo, several unrelated edits, an investigation running next to a build. Four agents finishing in thirty seconds is the point of this mode; doing the same work yourself in five sequential minutes is the failure the user turned this mode on to avoid, and they should visibly see agents being used. Still do not deploy for a single lookup, a single small edit, or a chain where every step depends on the previous one, and never deploy to avoid working: you stay responsible for the result, you read every report, and you do the synthesis yourself.",
+        `MAJOR MODE IS ON. The user deliberately picked Major, the highest step of the effort slider, for this turn. It does two things: you run at the model's maximum reasoning effort, and you delegate aggressively. The restraint in the subagents block above is relaxed for exactly this mode: there, delegation must earn its place; here, delegation IS the default shape of your work. Whenever a task splits into two or more parts that do not depend on each other, deploy one agent per part in a SINGLE response so they run in parallel, and do that even for parts you could have handled yourself in a few tool calls. The runtime allows at most ${maxConcurrentAgents} agents running at the same time and at most ${maxAgentRunsPerTurn} agent runs in one main turn: if the work splits into more independent parts than that, start the first ${maxConcurrentAgents} and launch the next ones as slots free up, do not fire off more than that at once and expect them to queue. Your turn does not end while agents you started are still running, and each report is injected the moment that agent finishes, so keep working or wait for them, and write your final synthesis only after the last one is back. Concretely: several files or subsystems to inspect, several independent questions, a sweep across the repo, several unrelated edits, an investigation running next to a build. Four agents finishing in thirty seconds is the point of this mode; doing the same work yourself in five sequential minutes is the failure the user turned this mode on to avoid, and they should visibly see agents being used. Still do not deploy for a single lookup, a single small edit, or a chain where every step depends on the previous one, and never deploy to avoid working: you stay responsible for the result, you read every report, and you do the synthesis yourself.`,
         "IN MAJOR MODE AGENTS ALSO VERIFY, NOT ONLY EXPLORE AND BUILD. Delegation is not just for gathering and writing. Once you have produced something substantial, put agents on checking it, in parallel, while you continue. The shapes that pay off: a research agent that looks up the authoritative source for every external thing you relied on (official documentation such as learn.microsoft.com, an API reference, a spec, a version's actual behaviour) and reports where your assumption does not match it; a review agent that reads the code you just wrote together with its callers and hunts concrete edge cases, boundary values, error paths, lifetime and ordering problems; and where the project allows it, a worker agent that actually exercises the thing, builds it, runs the test or the command, and reports the real output instead of your expectation. Give each verification agent the concrete claim you want checked and the files or sources it applies to, never a vague \"review this\", and require it to state explicitly that it found no defect when it found none, so silence is never mistaken for a clean result. Their findings are input, not verdicts: you judge what is real, you fix it, and your final answer says what was actually verified and what stayed unverified.",
         "AGENT MODEL COST RULE. These four models are expensive and you may NOT start or continue any agent run on them without the user's explicit approval first: moonshotai/kimi-k3, openai/gpt-5.6-sol, anthropic/claude-sonnet-5, anthropic/claude-opus-5. That covers deploy_agent and continue_agent alike, including switching an existing agent session onto one of them through continue_agent's model argument. If one of them is genuinely right for a job, say in one sentence which model, which job, and why, then wait for the user's answer before starting that run. Every other model in the agent list you use freely without asking. Never use NVIDIA endpoint models for agents, that endpoint is often switched off. When in doubt take the cheaper model: the point of this mode is many parallel agents, not four expensive ones."));
     }
@@ -4962,6 +4963,22 @@ const writeReasoningDump = async (root, turnId, round, model, reasoning) => {
   return { name, headLimit: tail.length + 9 };
 };
 
+const maxTurnLogBytes = 4 * 1024 * 1024;
+
+const appendTurnLog = async (entry) => {
+  try {
+    const file = getUserFile("turn-log.jsonl");
+    const stat = await fs.stat(file).catch(() => null);
+    if (stat && stat.size > maxTurnLogBytes) {
+      const kept = (await fs.readFile(file, "utf8")).split("\n").filter(Boolean).slice(-2000).join("\n");
+      await fs.writeFile(file, `${kept}\n`, "utf8");
+    }
+    await fs.appendFile(file, `${JSON.stringify(entry)}\n`, "utf8");
+  } catch {}
+};
+
+const turnLogSnippet = (value, max = 220) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+
 const runAgentStream = async (payload, sender) => {
   const emitBase = (event) => sender.send("agent:event", { requestId: payload.requestId, ...event });
   const settings = await readSettings();
@@ -4989,6 +5006,9 @@ const runAgentStream = async (payload, sender) => {
     narrator.observe(event);
     emitBase(event);
   };
+  const turnStartedAt = Date.now();
+  const tools = [];
+  let turnRounds = 0;
   try {
     const messages = [
       { role: "system", content: buildSystemPrompt(index, payload.mode, payload, readFiles) },
@@ -5014,7 +5034,6 @@ const runAgentStream = async (payload, sender) => {
       stripVisualNote(payload.message),
     ].filter((c) => c.trim() && c.split(/\r?\n/).length <= 500).slice(-8).map((c) => c.slice(0, 4000));
     const visualContext = (Array.isArray(payload.visualContext) ? payload.visualContext : []).map((v) => String(v || "")).filter(Boolean).slice(-6);
-    const tools = [];
     commandCount = 0;
     const runtime = { depth: 0, payload, deployments: { count: 0 }, commandBudget: { count: 0 }, signal: controller.signal };
     let finalText = "";
@@ -5024,10 +5043,12 @@ const runAgentStream = async (payload, sender) => {
     const steeredIds = [];
     const goalActive = Boolean(payload.goalMode && payload.goal && !payload.planMode);
     let goalRound = 0;
+    let naturalEnd = false;
     while (true) {
       let submitted = null;
       let planPresented = false;
       for (let round = 0; round < maxToolRounds; round += 1) {
+        turnRounds += 1;
         for (const steer of takeInjections(payload.requestId)) {
           messages.push({ role: "user", content: `[The user sent this message while you were still working on this turn. It is a real message from them, not an app event. ANSWER IT IN VISIBLE TEXT IN YOUR VERY NEXT OUTPUT, before your next tool call: reply to what they actually said, in one or two sentences, and say what it changes about what you are doing. Do not silently absorb it and carry on, do not save the reply for the end of the turn, and do not answer it only inside your reasoning. After you have replied, keep working, this does not end the turn. Adjust the plan if their message changes the task, and do not restart work you have already finished.]\n\n${steer.text}` });
           steeredIds.push(steer.id);
@@ -5144,6 +5165,7 @@ const runAgentStream = async (payload, sender) => {
             contextTracker.commit();
             continue;
           }
+          naturalEnd = true;
           break;
         }
         const runCall = async (call) => {
@@ -5337,7 +5359,57 @@ const runAgentStream = async (payload, sender) => {
     const settledUsage = measureContextState({ ...payload, history: retainedHistory, message: "", readPaths: retainedPaths }, index, retainedFiles, contextMcpSpecs);
     contextTracker?.settle(settledUsage);
     emit({ type: "done", content: fallback, tools, policy });
+    const wasSubmitted = tools.some((tool) => tool.name === "submit_result" && tool.result?.submitted);
+    const lastVerdict = tools.filter((tool) => tool.name === "verify_goal").pop()?.result?.verifier || null;
+    const stop = controller.signal.aborted
+      ? "user_stopped"
+      : policy
+        ? "policy_block"
+        : goalActive
+          ? (lastVerdict?.done ? "goal_verified" : (goalRound >= maxGoalRounds ? "goal_rounds_exhausted" : (naturalEnd ? "final_answer" : "tool_rounds_exhausted")))
+          : (planWasPresented ? "plan_presented" : (wasSubmitted ? "result_submitted" : (naturalEnd ? "final_answer" : "tool_rounds_exhausted")));
+    await appendTurnLog({
+      at: new Date().toISOString(),
+      stop,
+      finishReason: lastFinish || "",
+      ms: Date.now() - turnStartedAt,
+      rounds: turnRounds,
+      roundLimit: maxToolRounds,
+      toolCalls: tools.length,
+      agentRuns: runtime.deployments.count,
+      commands: runtime.commandBudget.count,
+      outTokensEstimate: messages.filter((m) => m.role === "assistant").reduce((sum, m) => sum + estimateTokens(String(m.content || "")) + estimateTokens(JSON.stringify(m.tool_calls || [])), 0),
+      contextTotal: settledUsage?.total ?? null,
+      model: payload.model || "",
+      effort: payload.effort || "",
+      mode: payload.mode || "",
+      planMode: Boolean(payload.planMode),
+      goalMode: goalActive,
+      chatId: payload.chatId || "",
+      requestId: payload.requestId || "",
+      turnId: payload.turnId || "",
+      user: turnLogSnippet(payload.message),
+      final: turnLogSnippet(fallback),
+    });
     return { content: fallback, tools, policy, steered: steeredIds };
+  } catch (error) {
+    await appendTurnLog({
+      at: new Date().toISOString(),
+      stop: "error",
+      error: turnLogSnippet(error?.message || error, 400),
+      ms: Date.now() - turnStartedAt,
+      rounds: turnRounds,
+      roundLimit: maxToolRounds,
+      toolCalls: tools.length,
+      model: payload.model || "",
+      effort: payload.effort || "",
+      mode: payload.mode || "",
+      chatId: payload.chatId || "",
+      requestId: payload.requestId || "",
+      turnId: payload.turnId || "",
+      user: turnLogSnippet(payload.message),
+    });
+    throw error;
   } finally {
     pendingInjections.delete(payload.requestId);
     pendingAgentReports.delete(payload.requestId);

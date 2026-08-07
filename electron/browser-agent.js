@@ -17,11 +17,11 @@ import {
 const snapshotLifetime = 30000;
 const visionLifetime = 30000;
 const visionClickLifetime = 3000;
-const commandTimeout = 12000;
+const commandTimeout = 60000;
 const maxSnapshotNodes = 450;
 const defaultSnapshotChars = 12000;
 const maxSnapshotChars = 24000;
-const maxWait = 30000;
+const maxWait = 120000;
 const visualDomRoles = new Set(["button", "checkbox", "combobox", "link", "menuitem", "option", "radio", "searchbox", "switch", "tab", "textbox"]);
 
 const randomId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 9)}`;

@@ -4,9 +4,10 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 const terminalStatuses = new Set(["completed", "failed", "canceled", "interrupted", "context_limit", "max_rounds"]);
-const maxSessions = 200;
-const maxRuns = 40;
+const maxSessions = 1000;
+const maxRuns = 200;
 const maxReportChars = 30000;
+export const maxConcurrentAgents = 12;
 
 const cleanText = (value, max) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 
@@ -250,8 +251,8 @@ export const createAgentSessionManager = ({ dataFile, emit = () => {}, emitTrans
   };
 
   const begin = async ({ agentId = "", chatId, turnId, projectPath, name, description, model, effort, profile, prompt }) => {
-    if (runningCount() >= 4) {
-      return { error: "At most 4 agents can run at once." };
+    if (runningCount() >= maxConcurrentAgents) {
+      return { error: `At most ${maxConcurrentAgents} agents can run at once.` };
     }
     const cleanPrompt = String(prompt || "").trim();
     if (!cleanPrompt) {

@@ -5,8 +5,9 @@ import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
 const terminalStatuses = new Set(["completed", "failed", "canceled", "interrupted"]);
-const maxStoredTasks = 500;
+const maxStoredTasks = 2000;
 const maxTailBytes = 256 * 1024;
+const maxRunningTasks = 16;
 
 const stripAnsi = (text) => String(text || "")
   .replace(/\x1B\[[0-9;?]*[A-Za-z]/g, "")
@@ -191,8 +192,8 @@ export const createBackgroundTaskManager = ({
   };
 
   const start = async ({ projectPath, chatId, turnId, name, category, command, cwd = ".", expectedMinutes = 0 }) => {
-    if ([...tasks.values()].filter((task) => task.status === "running").length >= 4) {
-      return { error: "At most 4 background tasks can run at once." };
+    if ([...tasks.values()].filter((task) => task.status === "running").length >= maxRunningTasks) {
+      return { error: `At most ${maxRunningTasks} background tasks can run at once.` };
     }
     const cleanName = cleanText(name, 120);
     const cleanCategory = cleanText(category, 40);

@@ -127,6 +127,7 @@ const STRINGS = {
     "edit.nFiles": "{n} files edited",
     "cluster.commands": "Ran {n} commands",
     "cluster.agents": "Deployed {n} agents",
+    "cluster.agentStatus": "Checked agent status {n}x",
     "cluster.oneRead": "Read 1 file",
     "cluster.reads": "Read {n} files",
     "cluster.mcp": "Ran {n} MCP commands",
@@ -590,6 +591,7 @@ const STRINGS = {
     "edit.nFiles": "{n} Dateien bearbeitet",
     "cluster.commands": "{n} Befehle ausgeführt",
     "cluster.agents": "{n} Agenten deployed",
+    "cluster.agentStatus": "Agent-Status {n}x geprüft",
     "cluster.oneRead": "1 Datei gelesen",
     "cluster.reads": "{n} Dateien gelesen",
     "cluster.mcp": "{n} MCP-Befehle ausgeführt",
@@ -5268,6 +5270,12 @@ const LayoutDashboardIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const LineSquiggleIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M7 3.5c5-2 7 2.5 3 4C1.5 10 2 15 5 16c5 2 9-10 14-7s.5 13.5-4 12c-5-2.5.5-11 6-2" />
+  </svg>
+);
+
 const BotIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" />
@@ -6190,6 +6198,15 @@ const groupWorkSegments = (segments) => {
       }
       continue;
     }
+    if (tool?.name === "get_agent_status") {
+      const last = blocks[blocks.length - 1];
+      if (last && last.kind === "agentstatus") {
+        last.tools.push(tool);
+      } else {
+        blocks.push({ kind: "agentstatus", tools: [tool] });
+      }
+      continue;
+    }
     if (tool?.name === "web_search") {
       const existing = blocks.find((block) => block.kind === "websearch");
       if (existing) {
@@ -6718,6 +6735,19 @@ const SteerStep = ({ text }) => (
   </div>
 );
 
+const AgentStatusGroup = ({ tools }) => (
+  <details className="cmd-group">
+    <summary>
+      <span className="step-marker"><LineSquiggleIcon size={14} /></span>
+      <span>{t("cluster.agentStatus", { n: tools.length })}</span>
+      <ChevronRight size={13} className="edit-chevron" />
+    </summary>
+    <div className="cmd-group-body">
+      {tools.map((tool, index) => <ToolStep tool={tool} key={tool.id || index} />)}
+    </div>
+  </details>
+);
+
 const TodoStep = ({ tool }) => (
   <div className="tool-step todo-step">
     <span className="step-marker todo-step-mark"><SquarePenIcon size={14} /></span>
@@ -7122,6 +7152,11 @@ const WorkLog = ({ segments, startedAt, workMs, working, liveTool, hasPlan, onIm
           }
           if (block.kind === "steer") {
             return <SteerStep text={block.text} key={key} />;
+          }
+          if (block.kind === "agentstatus") {
+            return block.tools.length === 1
+              ? <ToolStep tool={block.tools[0]} key={key} />
+              : <AgentStatusGroup tools={block.tools} key={key} />;
           }
           if (block.kind === "websearch") {
             return <WebSearchGroup tools={block.tools} key={key} />;
