@@ -6811,6 +6811,18 @@ const WebSearchGroup = ({ tools }) => {
     : (hosts.size === 0
       ? t("web.searchedWeb")
       : (hosts.size === 1 ? t("web.searchedSite", { site: [...hosts][0] }) : t("web.searchedSites", { n: hosts.size })));
+  if (tools.every((tool) => tool.result?.depth === "basic")) {
+    const site = tools.map((tool) => (tool.result?.running ? tool.result.site : "")).filter(Boolean).pop();
+    const line = running ? (site ? t("web.checkingSite", { site }) : t("web.searchingWeb")) : label;
+    return (
+      <div className="tool-step web-search-basic">
+        <span className="step-marker"><Globe size={14} /></span>
+        {running
+          ? <span className="step-label live-label" data-shimmer-label={line}>{line}</span>
+          : <span className="step-label">{line}</span>}
+      </div>
+    );
+  }
   return (
     <details className="tool-step web-search">
       <summary>
