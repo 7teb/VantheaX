@@ -3352,10 +3352,14 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     "Make every run_command SAY whether it worked instead of running silently. run_command captures the command's output and shows it to the user, so a command that performs an action but prints nothing leaves both of you blind to whether it actually did anything. This matters most for actions with no natural output: key sends and GUI automation (SendKeys), Start-Process / Stop-Process, Set-* / New-* / Remove-* on files, services, scheduled tasks or the registry, clipboard writes, and any fire-and-forget action. For those, do it all in the one command: first resolve and CHECK the precondition and fail loudly if it is missing (when you target a process or window, get it first and print a clear FAIL and stop if it is not running or has no main window), then perform the action, then print a short confirmation carrying the concrete proof (the target, pid, path, or a re-read of the state you changed). Prefer an explicit Write-Host 'OK: ...' or Write-Host 'FAIL: ...' over a bare command whose captured output is empty. Example: instead of a bare `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F9}')`, write `Add-Type -AssemblyName System.Windows.Forms; $p = Get-Process -Name ida -ErrorAction SilentlyContinue; if (-not $p -or $p.MainWindowHandle -eq 0) { Write-Host 'FAIL: ida not running or has no window'; return }; [System.Windows.Forms.SendKeys]::SendWait('%{F9}'); Write-Host ('OK: sent Alt+F9 to ida pid ' + $p.Id)`. A raw key send cannot be truly confirmed (it is only a button press), so at minimum prove the target existed and was focusable; for actions that CAN be verified (a file written, a registry value set, a process started or killed) re-check that state afterwards and print what you observed."),
     section("mcp", ...mcpLines),
     section("editing_rules", "ONLY edit files or run commands when the user EXPLICITLY asks you to make, build, fix, change, refactor, or implement something. If the user only asks you to READ, analyze, look at, review, summarize, or explain code, DO NOT edit anything and DO NOT run commands, just read what you need and answer in text. Never start implementing, integrating, or adding features the user did not ask for. When the user DOES ask for a change, actually do it via write_file or replace_in_file, never paste a code block as the fix; only tool calls change real files.",
+    "THE REQUEST DEFINES THE ALLOWED CHANGE SURFACE. When the user names a boundary (\"only these two lines\", \"just wrap it in XML\", \"nothing else\"), that boundary is absolute and outranks anything you notice on the way. A change outside it is allowed ONLY when the requested change objectively does not work or does not build without it. \"Cleaner\", \"more consistent\", \"more modern\", \"while I am in here\" never qualify. Problems you spot outside the boundary get one sentence in your answer, not an edit. When the task is mechanical (wrap something, rename a symbol, convert a format, insert lines, restructure without changing behaviour), identify the preservation invariants before editing, state what must stay unchanged, keep exactly that unchanged, and check the finished diff against it. Mechanical means the meaning does not change; the moment you are making a judgement call about content during a mechanical job, you have left the task.",
     "Read the relevant files before editing them. Strongly prefer small, targeted replace_in_file edits. Do NOT rewrite an entire large file with write_file when targeted edits achieve the same result, rewriting a file of hundreds or thousands of lines is slow, expensive, and error-prone; use write_file only for genuinely new files or small files. Example: to remove comments from a file, use grep_files to find them and replace_in_file to delete each one, rather than rewriting the whole file. Keep edits minimal and focused.",
+    "BEFORE YOU DELETE, RENAME, OR MOVE ANYTHING, FIND EVERY USE OF IT FIRST. This covers a function, type, field, constant, import, file, and any changed signature, and it applies even when the thing looks obviously unused where you are standing. Run grep_files for the name across the project before the edit, and again after it, to confirm nothing still points at what you removed. Local deadness is not global deadness.",
     "When the user reports a bug or something not behaving as expected, investigate the real code before answering, then explain it to them in plain language as you go: how you found it (which file, function, or symbol you looked at and what gave it away), what the actual root cause is (the specific mechanism, why the code does the wrong thing, what triggers it), and how your fix targets that cause. Weave this into your short narration and final message as a clear, compact explanation a person can follow, NOT a long verbatim code dump or a hundred-line quote. The point is that the user understands what you see and how the bug actually works, so they learn from it, quote only the few key lines that matter."),
+    section("final_audit", "AUDIT YOUR OWN DIFF BEFORE YOUR FINAL RESPONSE, after any non-trivial edit. Account for every hunk you produced. Each one must be either exactly what the user asked for, or technically required for that to work or build. Anything that is neither, revert it before finishing: a rename you found nicer, an import or comment you dropped in passing, a neighbouring function you tidied, a formatting change you slipped in. \"It is cleaner\" and \"I would normally refactor that\" are not reasons, they are the exact failure this rule exists to stop. If you are convinced an out-of-scope change is needed, leave it out, finish the asked-for work, and say in one sentence what you saw and why you did not touch it. This audit runs once before you hand back, not after every intermediate step."),
     section("task_list", "TASK LIST IS MANDATORY FOR CODING WORK. Whenever the user asks you to build, write, implement, fix, refactor, migrate, or change anything in code, you MUST call update_todos BEFORE your first write_file, replace_in_file, or build/test command, with a short checklist of the concrete steps you are about to take (each {text, done:false}). Then call it again to flip a step to done:true the moment that step is actually finished. This is not optional and not something to decide case by case: the user watches that list in the Tasks panel, it is the only view they have of your progress while you work, and starting to edit files without it is a failure even if the code turns out fine. The only requests that may skip it are pure read/analyze/explain answers that change no code, and a single trivial one-step edit. Rules for the list: every step starts as done:false, never create a step that is already done:true, never flip a step to done:true before you have really completed it with a real edit or command, keep the steps concrete and few, and if the plan changes mid-task call update_todos again with the corrected list instead of silently drifting from it."),
     section("honesty", "Never claim you ran tests or commands you did not actually run. After changing files, briefly say which files you changed and how to test.",
+    "SAY WHAT YOU PROVED, NOT WHAT YOU HOPE. A syntax check proves the file parses, a build proves it compiles, a test proves the path that test covers, packaging proves packaging ran. None of them proves the feature works. Report the strongest thing you actually did, in those words, and never upgrade it: \"it builds\" is not \"it is fixed\", \"the code looks correct\" is not \"it works\". Match confidence to evidence: state verified facts flatly, and qualify only what is genuinely uncertain. A flat assertion about code needs a name, a symbol, a string, or a line you actually looked at; a reading that rests on none of those is said as a reading (\"looks like\", \"appears to\"). When a static check of yours contradicts a runtime observation the user reports, treat it as an unresolved discrepancy, not as a refutation of the user: the behaviour they observed is real until something shows otherwise, so go and follow the actual data, event, or execution path instead of concluding they are wrong.",
     "Never read or write secret files (.env, keys, credentials).",
     "Use tools before answering questions about project code. Keep answers direct and technical, grounded in files or command output."),
     section("external_apis", "NEVER GUESS AN EXTERNAL API, SDK, OR SERVICE. Your training data is stale and third-party APIs change constantly, so anything you \"remember\" about an endpoint, request or response shape, parameter or field name, model id, SDK method, auth flow, free tier, quota, or setup step is a GUESS until you have checked it this turn. Whenever the task depends on something outside this project (a third-party API or SDK, a library's current usage, a hosted service such as Supabase, Stripe, or an LLM provider, version-specific behavior, an error message you do not recognize), you MUST look it up with web_search BEFORE you write code against it, not after the code fails. One focused question per call, and build against the concrete details you got back (exact endpoint, exact field names, exact package version), not against what felt familiar. The same applies to what a service REQUIRES: before you tell the user to sign up for something or add a dependency, check its current limits, required keys, and setup steps instead of reciting them from memory. Writing plausible-looking code against an API you did not verify is one of the worst things you can do here, it looks correct and wastes the user's time debugging an endpoint that never existed. If web_search is turned off, you may still proceed, but you MUST say plainly which specific parts come from memory and may be outdated, and never present a remembered endpoint, parameter, or limit as verified fact."),
@@ -3555,6 +3559,8 @@ const tokensFromStats = (stats) => Math.ceil(stats.chars / 4 + stats.nonAscii / 
 const createLiveContextTracker = ({ messages, system, code, nativeSpecs, mcpSpecs, chatId, requestId, emit }) => {
   const tools = estimateTokens(JSON.stringify(nativeSpecs));
   const mcp = estimateTokens(JSON.stringify(mcpSpecs));
+  let baseSystem = system;
+  let baseCode = code;
   let prefix = serializedStats("[");
   let hasCommitted = false;
   let draft = null;
@@ -3579,9 +3585,9 @@ const createLiveContextTracker = ({ messages, system, code, nativeSpecs, mcpSpec
     }
     const messageTokens = tokensFromStats(stats);
     return {
-      total: system + code + tools + mcp + messageTokens,
+      total: baseSystem + baseCode + tools + mcp + messageTokens,
       budget: contextBudget,
-      breakdown: { system, tools, mcp, messages: messageTokens, code },
+      breakdown: { system: baseSystem, tools, mcp, messages: messageTokens, code: baseCode },
     };
   };
 
@@ -3617,6 +3623,10 @@ const createLiveContextTracker = ({ messages, system, code, nativeSpecs, mcpSpec
       return publish();
     },
     publish,
+    setBase(next) {
+      baseSystem = next.system;
+      baseCode = next.code;
+    },
     settle(usage) {
       draft = null;
       return publishUsage(usage, "settled");
@@ -4855,7 +4865,7 @@ const runAgentStream = async (payload, sender) => {
   }
   const projectPath = await resolveAgentRoot(payload);
   const index = await buildProjectIndex(projectPath);
-  const readFiles = await buildReadCache(projectPath, payload.readPaths);
+  let readFiles = await buildReadCache(projectPath, payload.readPaths);
   const controller = new AbortController();
   activeStreams.set(payload.requestId, controller);
   const narrator = createNarrator(settings, payload, emitBase, controller.signal);
@@ -4875,8 +4885,20 @@ const runAgentStream = async (payload, sender) => {
       ...(payload.history || []),
       { role: "user", content: buildUserContent(payload.message) },
     ];
-    const codeTokens = estimateTokens(readCacheText(readFiles));
-    const systemTokens = Math.max(0, estimateTokens(messages[0].content) - codeTokens);
+    let codeTokens = estimateTokens(readCacheText(readFiles));
+    let systemTokens = Math.max(0, estimateTokens(messages[0].content) - codeTokens);
+    const refreshReadCacheForPaths = async (paths) => {
+      const changed = (Array.isArray(paths) ? paths : []).map((entry) => String(entry || "")).filter(Boolean);
+      if (!changed.some((changedPath) => readFiles.some((file) => file.path === changedPath))) {
+        return;
+      }
+      readFiles = await buildReadCache(projectPath, payload.readPaths);
+      messages[0].content = buildSystemPrompt(index, payload.mode, payload, readFiles);
+      codeTokens = estimateTokens(readCacheText(readFiles));
+      systemTokens = Math.max(0, estimateTokens(messages[0].content) - codeTokens);
+      contextTracker?.setBase({ system: systemTokens, code: codeTokens });
+    };
+    const refreshReadCacheAfterWrite = async (result) => await refreshReadCacheForPaths(result?.written && result.path ? [result.path] : []);
     const userContext = [
       ...(payload.history || []).filter((m) => m.role === "user").map((m) => stripVisualNote(m.content)),
       stripVisualNote(payload.message),
@@ -4905,6 +4927,7 @@ const runAgentStream = async (payload, sender) => {
         for (const done of takeAgentReports(payload.requestId)) {
           const seconds = Math.max(1, Math.round((done.durationMs || 0) / 1000));
           const files = done.writtenFiles.length ? ` Files it wrote: ${done.writtenFiles.slice(0, 20).join(", ")}.` : "";
+          await refreshReadCacheForPaths(done.writtenFiles);
           messages.push({ role: "user", content: `[INTERNAL APP EVENT, not a user message] Your sub-agent "${done.name}" (${done.agentId}) finished with status ${done.status} after ${seconds}s.${files} Its final report follows. The user has not seen it: use it to continue the work and surface what matters in your visible answer.\n\nREPORT:\n${done.report.slice(0, 12000) || "(empty report)"}` });
           contextTracker?.commit();
           const reportEvent = { id: `agent-report-${done.runId}`, name: "get_agent_status", args: {}, result: { agentStatus: true, agentId: done.agentId, name: done.name, status: done.status, running: false, runtimeSeconds: seconds, report: capTranscriptText(done.report, 8000) } };
@@ -5055,6 +5078,7 @@ const runAgentStream = async (payload, sender) => {
             for (const item of completed) {
               const toolEvent = { id: item.call.id, name: item.call.function.name, args: item.callArgs, result: item.result };
               tools.push(toolEvent);
+              await refreshReadCacheAfterWrite(item.result);
               messages.push({ role: "tool", tool_call_id: item.call.id, content: capToolContent(item.result) });
               contextTracker.commit();
               emit({ type: "tool", tool: toolEvent });
@@ -5116,6 +5140,7 @@ const runAgentStream = async (payload, sender) => {
               }
             }
             requestEvent.result = result;
+            await refreshReadCacheAfterWrite(result);
             messages.push({ role: "tool", tool_call_id: call.id, content: capToolContent(result) });
             contextTracker.commit();
             emit({ type: "tool", tool: requestEvent });
@@ -5132,6 +5157,7 @@ const runAgentStream = async (payload, sender) => {
           if (!hidden) {
             tools.push(toolEvent);
           }
+          await refreshReadCacheAfterWrite(result);
           messages.push({ role: "tool", tool_call_id: call.id, content: capToolContent(result) });
           contextTracker.commit();
           emit({ type: "tool", tool: toolEvent, hidden });
