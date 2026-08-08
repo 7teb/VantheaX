@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, Download, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Paperclip, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Target, Terminal, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, Clock, Download, FileText, FolderClosed, FolderOpen, FolderPlus, Folders, FolderX, Globe, Hand, Image as ImageIcon, ListChecks, Maximize2, MessageSquare, Minimize2, Minus, MoreHorizontal, MoreVertical, PanelLeft, PanelRight, Pencil, PencilLine, Pin, Plug, Plus, Search, Settings, ShieldCheck, Square, Terminal, Trash2, Undo2, X } from "lucide-react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -80,9 +80,18 @@ const STRINGS = {
     "queued.more": "More",
     "queued.edit": "Edit",
     "plus.add": "Add",
-    "plus.attach": "Add photos and text files",
+    "plus.attach": "Files and folders",
     "plus.planMode": "Plan mode",
-    "plus.goalMode": "Track a goal",
+    "plus.goalMode": "Goal",
+    "plus.groupAdd": "Add",
+    "plus.groupChats": "Chats",
+    "plus.planOn": "Turn plan mode on",
+    "plus.planOff": "Turn plan mode off",
+    "plus.goalOn": "Set a goal to track",
+    "plus.goalOff": "Stop tracking the goal",
+    "plus.chat": "Chat",
+    "plus.noProject": "no project",
+    "plus.turnOff": "Turn off",
     "perm.title": "Command permission",
     "perm.ask": "Ask",
     "perm.askDesc": "Approve every command",
@@ -564,9 +573,18 @@ const STRINGS = {
     "queued.more": "Mehr",
     "queued.edit": "Bearbeiten",
     "plus.add": "Hinzufügen",
-    "plus.attach": "Fotos und Textdateien hinzufügen",
+    "plus.attach": "Dateien und Ordner",
     "plus.planMode": "Planmodus",
-    "plus.goalMode": "Ziel verfolgen",
+    "plus.goalMode": "Ziel",
+    "plus.groupAdd": "Hinzufügen",
+    "plus.groupChats": "Chats",
+    "plus.planOn": "Planmodus einschalten",
+    "plus.planOff": "Planmodus ausschalten",
+    "plus.goalOn": "Ein Ziel zum Weiterverfolgen festlegen",
+    "plus.goalOff": "Ziel nicht mehr verfolgen",
+    "plus.chat": "Chat",
+    "plus.noProject": "kein Projekt",
+    "plus.turnOff": "Ausschalten",
     "perm.title": "Befehlsfreigabe",
     "perm.ask": "Fragen",
     "perm.askDesc": "Jeden Befehl bestätigen",
@@ -2655,6 +2673,8 @@ const App = () => {
 
   const noProjectChats = useMemo(() => sortChats(chats.filter((chat) => !chat.projectPath)), [chats]);
 
+  const plusMenuChats = useMemo(() => sortChats(chats.filter((chat) => chat.id !== activeChatId)).slice(0, 20), [chats, activeChatId]);
+
   const visibleModels = useMemo(
     () => models.filter((model) => model.apiProvider !== "nvidia" || settings.nvidia?.enabled),
     [models, settings.nvidia?.enabled],
@@ -4402,7 +4422,8 @@ const App = () => {
                 <textarea value={input} onChange={(event) => setInput(event.target.value)} onPaste={onComposerPaste} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submitFromComposer(); } }} placeholder={goalMode && !goalText ? t("composer.goalPlaceholder") : t("composer.placeholder")} />
                 <div className="composer-controls">
                   <input ref={fileInputRef} className="hidden-input" type="file" accept="image/*,text/*,.md,.markdown,.log,.json,.jsonl,.csv,.tsv,.xml,.yml,.yaml,.ini,.cfg,.conf,.toml,.env,.sql,.sh,.bash,.ps1,.bat,.cmd,.c,.h,.cpp,.cc,.cxx,.hpp,.cs,.js,.jsx,.mjs,.cjs,.ts,.tsx,.py,.rb,.rs,.go,.java,.kt,.php,.lua,.pl,.r,.swift,.asm,.diff,.patch,.html,.htm,.css,.scss,.vue,.svelte,.gradle,.properties,.map" multiple onChange={onImageSelected} />
-                  <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) setGoalMode(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) setPlanMode(false); }} />
+                  <PlusMenu open={plusMenuOpen} onToggle={() => setPlusMenuOpen(!plusMenuOpen)} onPickFile={() => { setPlusMenuOpen(false); pickImage(); }} planMode={planMode} goalMode={goalMode} onTogglePlan={() => { const next = !planMode; setPlanMode(next); if (next) { setGoalMode(false); } setPlusMenuOpen(false); }} onToggleGoal={() => { const next = !goalMode; setGoalMode(next); if (next) { setPlanMode(false); } setPlusMenuOpen(false); }} chats={plusMenuChats} chatTitle={displayTitle} onOpenChat={(chat) => { setPlusMenuOpen(false); openChat(chat); }} />
+                  {(planMode || goalMode) && <ModeChip planMode={planMode} onClear={() => { setPlanMode(false); setGoalMode(false); }} />}
                   <div className="composer-spacer" />
                   <ModelEffortPicker models={visibleModels} value={settings.model} effort={settings.effort} narrator={Boolean(settings.narrator?.enabled)} mode={settings.mode} open={modelOpen} onToggle={() => setModelOpen(!modelOpen)} onModelChange={(model) => { const selected = models.find((item) => item.id === model); persistSettings({ model, effort: selected?.defaultEffort || "" }); }} onEffortChange={(effort) => persistSettings({ effort })} onNarratorChange={(enabled) => persistSettings({ narrator: { ...(settings.narrator || {}), enabled } })} onModeChange={(mode) => persistSettings({ mode })} />
                   {(naming || sending) ? (
@@ -5009,28 +5030,68 @@ const TitlebarMenu = ({ open, setOpen, actions }) => {
   );
 };
 
-const PlusMenu = ({ open, onToggle, onPickFile, planMode, goalMode, onTogglePlan, onToggleGoal }) => (
+const LightbulbIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" /><path d="M9 18h6" /><path d="M10 22h4" />
+  </svg>
+);
+
+const GoalIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M12 13V2l8 4-8 4" /><path d="M20.561 10.222a9 9 0 1 1-12.55-5.29" /><path d="M8.002 9.997a5 5 0 1 0 8.9 2.02" />
+  </svg>
+);
+
+const PaperclipVerticalIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M14.09 8.3v6.7a2.09 2.09 0 0 1-4.18 0V6.58a4.18 4.18 0 0 1 8.36 0v8.17a6.27 6.27 0 0 1-12.54 0V8.4" />
+  </svg>
+);
+
+const CircleIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <circle cx="12" cy="12" r="10" />
+  </svg>
+);
+
+const PlusMenu = ({ open, onToggle, onPickFile, planMode, goalMode, onTogglePlan, onToggleGoal, chats, chatTitle, onOpenChat }) => (
   <div className="plus-picker">
     <button className="tool-button" onClick={onToggle} title={t("plus.add")}><Plus size={16} /></button>
     {open && (
       <div className="plus-menu">
+        <div className="plus-menu-label">{t("plus.groupAdd")}</div>
         <button className="plus-menu-row" onClick={onPickFile}>
-          <Paperclip size={16} />
-          <span>{t("plus.attach")}</span>
+          <PaperclipVerticalIcon size={15} />
+          <span className="plus-menu-name">{t("plus.attach")}</span>
         </button>
-        <div className="plus-menu-divider" />
-        <button className="plus-menu-row toggle-row" onClick={onTogglePlan}>
-          <ListChecks size={16} />
-          <span>{t("plus.planMode")}</span>
-          <span className={planMode ? "toggle is-on" : "toggle"} />
+        <button className={goalMode ? "plus-menu-row is-on" : "plus-menu-row"} onClick={onToggleGoal}>
+          <GoalIcon size={15} />
+          <span className="plus-menu-name">{t("plus.goalMode")}</span>
+          <span className="plus-menu-desc">{t(goalMode ? "plus.goalOff" : "plus.goalOn")}</span>
         </button>
-        <button className="plus-menu-row toggle-row" onClick={onToggleGoal}>
-          <Target size={16} />
-          <span>{t("plus.goalMode")}</span>
-          <span className={goalMode ? "toggle is-on" : "toggle"} />
+        <button className={planMode ? "plus-menu-row is-on" : "plus-menu-row"} onClick={onTogglePlan}>
+          <LightbulbIcon size={15} />
+          <span className="plus-menu-name">{t("plus.planMode")}</span>
+          <span className="plus-menu-desc">{t(planMode ? "plus.planOff" : "plus.planOn")}</span>
         </button>
+        <div className="plus-menu-label">{t("plus.groupChats")}</div>
+        {chats.map((chat) => (
+          <button className="plus-menu-row" key={chat.id} onClick={() => onOpenChat(chat)}>
+            <CircleIcon size={15} />
+            <span className="plus-menu-name">{chatTitle(chat)}</span>
+            <span className="plus-menu-desc">{chat.projectPath ? folderName(chat.projectPath) : t("plus.noProject")}</span>
+          </button>
+        ))}
       </div>
     )}
+  </div>
+);
+
+const ModeChip = ({ planMode, onClear }) => (
+  <div className="mode-chip">
+    {planMode ? <LightbulbIcon size={14} /> : <GoalIcon size={14} />}
+    <span>{t(planMode ? "plus.planMode" : "plus.goalMode")}</span>
+    <button type="button" className="mode-chip-off" title={t("plus.turnOff")} onClick={onClear}><X size={12} /></button>
   </div>
 );
 
