@@ -3609,6 +3609,21 @@ const readFilesSuffix = (files) => {
 
 const fileBlock = (file, suffix) => `<vantheax_file${suffix} path="${escapeXmlAttr(file.path)}">\n${file.content}\n</vantheax_file${suffix}>`;
 
+const agentRosterLines = (payload) => {
+  if (payload.agentSession || !agentSessionManager || !payload.chatId) {
+    return [];
+  }
+  const list = (agentSessionManager.list(payload.chatId) || []).slice(0, 12);
+  if (!list.length) {
+    return [];
+  }
+  const rows = list.map((entry) => {
+    const seconds = Math.max(0, Math.round((entry.durationMs || (entry.status === "running" ? Date.now() - Date.parse(entry.startedAt || "") : 0)) / 1000));
+    return `- ${entry.agentId} "${entry.name}" (${entry.model}, ${entry.status}${seconds ? `, ${seconds}s` : ""})`;
+  });
+  return [`AGENTS YOU STARTED IN THIS CHAT, newest first. This is the only place their ids survive across turns, because tool results from earlier turns are not in your history. Take an id from here instead of asking the user for it, and never claim you started no agent while this list is not empty. Use these ids with get_agent_status, message_agent, cancel_agent and continue_agent. A run marked running is still working right now.\n${rows.join("\n")}`];
+};
+
 const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   const installedSkills = skillStore.list();
   const skillLines = installedSkills.length ? [
@@ -3636,6 +3651,7 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     "Make every run_command SAY whether it worked instead of running silently. run_command captures the command's output and shows it to the user, so a command that performs an action but prints nothing leaves both of you blind to whether it actually did anything. This matters most for actions with no natural output: key sends and GUI automation (SendKeys), Start-Process / Stop-Process, Set-* / New-* / Remove-* on files, services, scheduled tasks or the registry, clipboard writes, and any fire-and-forget action. For those, do it all in the one command: first resolve and CHECK the precondition and fail loudly if it is missing (when you target a process or window, get it first and print a clear FAIL and stop if it is not running or has no main window), then perform the action, then print a short confirmation carrying the concrete proof (the target, pid, path, or a re-read of the state you changed). Prefer an explicit Write-Host 'OK: ...' or Write-Host 'FAIL: ...' over a bare command whose captured output is empty. Example: instead of a bare `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('%{F9}')`, write `Add-Type -AssemblyName System.Windows.Forms; $p = Get-Process -Name ida -ErrorAction SilentlyContinue; if (-not $p -or $p.MainWindowHandle -eq 0) { Write-Host 'FAIL: ida not running or has no window'; return }; [System.Windows.Forms.SendKeys]::SendWait('%{F9}'); Write-Host ('OK: sent Alt+F9 to ida pid ' + $p.Id)`. A raw key send cannot be truly confirmed (it is only a button press), so at minimum prove the target existed and was focusable; for actions that CAN be verified (a file written, a registry value set, a process started or killed) re-check that state afterwards and print what you observed."),
     section("mcp", ...mcpLines),
     section("skills", ...skillLines),
+    section("agent_roster", ...agentRosterLines(payload)),
     section("editing_rules", "ONLY edit files or run commands when the user EXPLICITLY asks you to make, build, fix, change, refactor, or implement something. If the user only asks you to READ, analyze, look at, review, summarize, or explain code, DO NOT edit anything and DO NOT run commands, just read what you need and answer in text. Never start implementing, integrating, or adding features the user did not ask for. When the user DOES ask for a change, actually do it via write_file or replace_in_file, never paste a code block as the fix; only tool calls change real files.",
     "THE REQUEST DEFINES THE ALLOWED CHANGE SURFACE. When the user names a boundary (\"only these two lines\", \"just wrap it in XML\", \"nothing else\"), that boundary is absolute and outranks anything you notice on the way. A change outside it is allowed ONLY when the requested change objectively does not work or does not build without it. \"Cleaner\", \"more consistent\", \"more modern\", \"while I am in here\" never qualify. Problems you spot outside the boundary get one sentence in your answer, not an edit. When the task is mechanical (wrap something, rename a symbol, convert a format, insert lines, restructure without changing behaviour), identify the preservation invariants before editing, state what must stay unchanged, keep exactly that unchanged, and check the finished diff against it. Mechanical means the meaning does not change; the moment you are making a judgement call about content during a mechanical job, you have left the task.",
     "Read the relevant files before editing them. Strongly prefer small, targeted replace_in_file edits. Do NOT rewrite an entire large file with write_file when targeted edits achieve the same result, rewriting a file of hundreds or thousands of lines is slow, expensive, and error-prone; use write_file only for genuinely new files or small files. Example: to remove comments from a file, use grep_files to find them and replace_in_file to delete each one, rather than rewriting the whole file. Keep edits minimal and focused.",
