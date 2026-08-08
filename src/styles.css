@@ -1579,18 +1579,6 @@ textarea {
   white-space: nowrap;
 }
 
-.agent-transcript-meta select {
-  max-width: 135px;
-  margin-left: auto;
-  padding: 3px 22px 3px 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-3);
-  color: var(--text-2);
-  font: inherit;
-  outline: none;
-}
-
 .agent-transcript-body {
   display: flex;
   flex: 1;
@@ -3850,9 +3838,10 @@ textarea {
 }
 
 .effort-slider-particles {
-  right: 0;
   z-index: 2;
+  width: clamp(10px, var(--effort-progress), calc(100% - 10px));
   overflow: hidden;
+  transition: width .3s cubic-bezier(.22, .72, .22, 1);
 }
 
 .effort-slider-particles i {

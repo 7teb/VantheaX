@@ -5264,9 +5264,9 @@ const ListTreeIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
-const LayoutDashboardIcon = ({ size = 24, ...rest }) => (
+const WormIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
-    <rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" />
+    <path d="m19 12-1.5 3" /><path d="M19.63 18.81 22 20" /><path d="M6.47 8.23a1.68 1.68 0 0 1 2.44 1.93l-.64 2.08a6.76 6.76 0 0 0 10.16 7.67l.42-.27a1 1 0 1 0-2.73-4.21l-.42.27a1.76 1.76 0 0 1-2.63-1.99l.64-2.08A6.66 6.66 0 0 0 3.94 3.9l-.7.4a1 1 0 1 0 2.55 4.34z" />
   </svg>
 );
 
@@ -5751,14 +5751,6 @@ const AgentTranscriptView = ({ task, full, onToggleFull, onBack, onClose }) => {
       <div className="agent-transcript-meta">
         <span>{data?.agent?.model || task.model} · {data?.agent?.effort || task.effort}</span>
         <span>{task.agentId || task.id}</span>
-        {(data?.runs?.length || 0) > 1 && (
-          <select value={runId} onChange={(event) => {
-            stickToBottomRef.current = true;
-            load(event.target.value);
-          }}>
-            {data.runs.map((run, index) => <option key={run.id} value={run.id}>Run {index + 1} · {run.status}</option>)}
-          </select>
-        )}
       </div>
       <div
         ref={bodyRef}
@@ -7408,7 +7400,7 @@ const getToolIcon = (name = "") => {
     return Globe;
   }
   if (lower === "remember" || lower === "forget" || lower === "list_memories") {
-    return LayoutDashboardIcon;
+    return WormIcon;
   }
   if (lower.startsWith("mcp__") || lower === "add_mcp_server") {
     return AtSignIcon;
