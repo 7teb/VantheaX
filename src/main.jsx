@@ -330,6 +330,10 @@ const STRINGS = {
     "toollabel.listMemories": "Reading memories",
     "toollabel.readSkill": "Reading skill {x}",
     "toollabel.installSkill": "Installing skill {x}",
+    "toollabel.cancelAgent": "Stopping agent {x}",
+    "toollabel.messageAgent": "Messaging agent {x}",
+    "agent.notRunning": "was not running, nothing was stopped",
+    "agent.stopped": "stopped",
     "memory.none": "No memories saved yet",
     "settings.tabSkills": "Skills",
     "skills.title": "Skills",
@@ -823,6 +827,10 @@ const STRINGS = {
     "toollabel.listMemories": "Liest Erinnerungen",
     "toollabel.readSkill": "Liest Skill {x}",
     "toollabel.installSkill": "Installiert Skill {x}",
+    "toollabel.cancelAgent": "Stoppt Agent {x}",
+    "toollabel.messageAgent": "Schickt Agent {x} eine Nachricht",
+    "agent.notRunning": "lief nicht, es wurde nichts gestoppt",
+    "agent.stopped": "gestoppt",
     "memory.none": "Noch keine Erinnerungen gespeichert",
     "settings.tabSkills": "Skills",
     "skills.title": "Skills",
@@ -5689,6 +5697,19 @@ const parseTranscriptArgs = (raw) => {
   }
 };
 
+const parseTranscriptJson = (text) => {
+  const raw = String(text || "").trim();
+  if (!raw.startsWith("{")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 const synthTranscriptResult = (name, args, status, text) => {
   const lower = String(name || "").toLowerCase();
   if (status === "running") {
@@ -5697,6 +5718,10 @@ const synthTranscriptResult = (name, args, status, text) => {
       result.command = args.command;
     }
     return result;
+  }
+  const parsed = parseTranscriptJson(text);
+  if (parsed) {
+    return parsed;
   }
   if (status === "denied") {
     return { denied: true, note: text || "" };
@@ -5774,7 +5799,12 @@ const transcriptToWork = (entries, run) => {
     if (entry.type === "progress") {
       const parent = toolById.get(entry.parentId);
       if (parent && parent.result?.running) {
-        parent.result.stdout = entry.text || "";
+        const info = parseTranscriptJson(entry.text);
+        if (info) {
+          parent.result = { ...parent.result, ...info, running: true };
+        } else {
+          parent.result.stdout = entry.text || "";
+        }
       }
     }
   }
@@ -6372,12 +6402,14 @@ const DiffView = ({ diff }) => {
 
 const EditGroup = ({ tools }) => {
   const files = clusterFileCount(tools) || tools.length;
+  const running = tools.some((tool) => tool.result?.running);
+  const label = files === 1 ? t("edit.oneFile") : t("edit.nFiles", { n: files });
   return (
   <details className="edit-group">
     <summary>
       <span className="step-marker"><PencilSparklesIcon size={14} /></span>
-      <span>{files === 1 ? t("edit.oneFile") : t("edit.nFiles", { n: files })}</span>
-      <ChevronRight size={13} className="edit-chevron" />
+      {running ? <span className="live-label" data-shimmer-label={label}>{label}</span> : <span>{label}</span>}
+      {running ? <LoaderIcon size={12} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
     </summary>
     <div className="edit-group-body">
       {tools.map((tool, idx) => (
@@ -6483,10 +6515,13 @@ const ClusterRow = ({ tool }) => {
   const diff = isEditTool(tool) ? result.diff : null;
   const runningArgs = (result.running && !result.command && tool.args && Object.keys(tool.args).length) ? JSON.stringify(tool.args, null, 2) : "";
   const hasBody = Boolean(diff || (Array.isArray(result.matches) && result.matches.length) || result.content || result.stdout || result.stderr || runningArgs);
+  const labelNode = result.running
+    ? <span className="cluster-row-label live-label" data-shimmer-label={label}>{label}</span>
+    : <span className="cluster-row-label">{label}</span>;
   if (!hasBody) {
     return (
       <div className="cluster-row-flat">
-        <span className="cluster-row-label">{label}</span>
+        {labelNode}
         {meta && <span className="cluster-row-meta">{meta}</span>}
       </div>
     );
@@ -6494,7 +6529,7 @@ const ClusterRow = ({ tool }) => {
   return (
     <details className="cluster-row">
       <summary>
-        <span className="cluster-row-label">{label}</span>
+        {labelNode}
         {meta && <span className="cluster-row-meta">{meta}</span>}
         <ChevronRight size={12} className="edit-chevron" />
       </summary>
@@ -6540,7 +6575,7 @@ const CommandGroup = ({ tools, kind }) => {
     <details className="cmd-group">
       <summary>
         <span className="step-marker"><Icon size={14} /></span>
-        <span>{label}</span>
+        {running ? <span className="live-label" data-shimmer-label={label}>{label}</span> : <span>{label}</span>}
         {Boolean(ranges) && <span className="cmd-group-meta">{ranges}</span>}
         {running ? <LoaderIcon size={12} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
       </summary>
@@ -6575,7 +6610,7 @@ const CombineGroup = ({ tools }) => {
     <details className="cmd-group">
       <summary>
         <span className="step-marker"><CombineIcon size={14} /></span>
-        <span>{label}</span>
+        {running ? <span className="live-label" data-shimmer-label={label}>{label}</span> : <span>{label}</span>}
         {running ? <LoaderIcon size={12} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
       </summary>
       <div className="cmd-group-body">
@@ -6768,7 +6803,7 @@ const ToolStep = ({ tool }) => {
     );
   }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
-  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || result.userCancelled || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.skillInstall || result.maxOutputError);
+  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || result.userCancelled || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.skillInstall || result.agentCancel || result.agentMessage || result.maxOutputError);
   return (
     <details className={`${needsPermission ? "tool-step permission" : ((result.error || result.maxOutputError) ? "tool-step failed" : "tool-step")}${isMemory ? " memory" : ""}`}>
       <summary>
@@ -6795,6 +6830,8 @@ const ToolStep = ({ tool }) => {
         {result.analysis && <PreBlock text={result.analysis} />}
         {result.memory && result.text && <div className="tool-command">{result.text}</div>}
         {result.skillInstall && result.installed && <div className="tool-meta">{result.name}: {result.description}</div>}
+        {result.agentCancel && <div className="tool-meta">{result.canceled ? (result.cancelReason || t("agent.stopped")) : t("agent.notRunning")}</div>}
+        {result.agentMessage && <div className="tool-command">{result.message}</div>}
         {Array.isArray(result.memories) && (result.memories.length
           ? <pre>{result.memories.slice(0, 300).map((m) => `(${m.id}) ${m.text}`).join("\n")}</pre>
           : <div className="tool-meta">{t("memory.none")}</div>)}
@@ -6854,25 +6891,34 @@ const SteerStep = ({ text }) => (
   </div>
 );
 
-const AgentStatusGroup = ({ tools }) => (
-  <details className="cmd-group">
-    <summary>
-      <span className="step-marker"><LineSquiggleIcon size={14} /></span>
-      <span>{t("cluster.agentStatus", { n: tools.length })}</span>
-      <ChevronRight size={13} className="edit-chevron" />
-    </summary>
-    <div className="cmd-group-body">
-      {tools.map((tool, index) => <ToolStep tool={tool} key={tool.id || index} />)}
-    </div>
-  </details>
-);
+const AgentStatusGroup = ({ tools }) => {
+  const running = tools.some((tool) => tool.result?.running);
+  const label = t("cluster.agentStatus", { n: tools.length });
+  return (
+    <details className="cmd-group">
+      <summary>
+        <span className="step-marker"><LineSquiggleIcon size={14} /></span>
+        {running ? <span className="live-label" data-shimmer-label={label}>{label}</span> : <span>{label}</span>}
+        {running ? <LoaderIcon size={12} className="running-spinner" /> : <ChevronRight size={13} className="edit-chevron" />}
+      </summary>
+      <div className="cmd-group-body">
+        {tools.map((tool, index) => <ToolStep tool={tool} key={tool.id || index} />)}
+      </div>
+    </details>
+  );
+};
 
-const TodoStep = ({ tool }) => (
-  <div className="tool-step todo-step">
-    <span className="step-marker todo-step-mark"><SquarePenIcon size={14} /></span>
-    <span className="step-label">{getToolLabel(tool)}</span>
-  </div>
-);
+const TodoStep = ({ tool }) => {
+  const label = getToolLabel(tool);
+  return (
+    <div className="tool-step todo-step">
+      <span className="step-marker todo-step-mark"><SquarePenIcon size={14} /></span>
+      {tool.result?.running
+        ? <span className="step-label live-label" data-shimmer-label={label}>{label}</span>
+        : <span className="step-label">{label}</span>}
+    </div>
+  );
+};
 
 const linkifyCitations = (text, sources) => {
   const list = Array.isArray(sources) ? sources : [];
@@ -7511,7 +7557,7 @@ const getToolIcon = (name = "") => {
   if (lower === "max_output_error") {
     return CloudAlertIcon;
   }
-  if (lower === "start_background_task" || lower === "get_background_task" || lower === "get_agent_status" || lower === "deploy_agent" || lower === "continue_agent") {
+  if (lower === "start_background_task" || lower === "get_background_task" || lower === "get_agent_status" || lower === "deploy_agent" || lower === "continue_agent" || lower === "cancel_agent" || lower === "message_agent") {
     return GitBranchPlusIcon;
   }
   if (lower === "web_search") {
@@ -7609,6 +7655,12 @@ const getToolLabel = (tool) => {
   }
   if (name === "list_memories") {
     return t("toollabel.listMemories");
+  }
+  if (name === "cancel_agent") {
+    return t("toollabel.cancelAgent", { x: result.name || tool.args?.agent_id || "" });
+  }
+  if (name === "message_agent") {
+    return t("toollabel.messageAgent", { x: result.name || tool.args?.agent_id || "" });
   }
   if (name === "read_skill") {
     return t("toollabel.readSkill", { x: tool.result?.name || tool.args?.name || "" });

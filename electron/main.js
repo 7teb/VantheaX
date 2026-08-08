@@ -1367,6 +1367,38 @@ const toolSpecs = [
   {
     type: "function",
     function: {
+      name: "cancel_agent",
+      description: "Stop a running agent by its agent_id. Use it when the agent is stuck, has drifted off its task, or its work is no longer needed, for example because you already solved the problem yourself. The run ends with status canceled and whatever it produced so far stays readable in its transcript, but you get no report from it. Cancelling is final for that run; you can start it again with continue_agent, which keeps its context. Say in your visible answer that you cancelled it and why.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_id: { type: "string", description: "Stable agent context id returned by deploy_agent." },
+          reason: { type: "string", description: "One short sentence on why you are stopping it. Shown to the user." },
+        },
+        required: ["agent_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "message_agent",
+      description: "Send a steering message to an agent that is CURRENTLY RUNNING, by its agent_id. It is delivered at the start of the agent's next round, so it arrives after the tool call it is in the middle of, not instantly. Use it to correct course without losing the work so far: narrow the scope, tell it to stop a line of investigation, hand it a fact it is missing, or tell it to wrap up and report now. Returns immediately and does not wait for the agent to react. For an agent that already finished, use continue_agent instead, which starts a new run on its kept context.",
+      parameters: {
+        type: "object",
+        properties: {
+          agent_id: { type: "string", description: "Stable agent context id returned by deploy_agent." },
+          message: { type: "string", description: "The instruction for the agent. Concrete and self-contained, it has no idea what you are doing." },
+        },
+        required: ["agent_id", "message"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "continue_thinking",
       description: "Take another full reasoning pass before you start working. Write ONE short sentence to the user first (that you can do it and are going to think it through), then call this in the SAME response. It runs no code, changes nothing, and reads nothing: it only gives you a fresh round to plan in, and the user sees 'Extended thinking' instead of 'Thinking' so a long pause does not look like a crash. ONLY for genuinely large work: designing a whole game, a whole framework or system architecture, a large multi-file refactor, or a real implementation plan. Also use it whenever the user explicitly asks you to think longer or plan first. NEVER for a small script, a few bug fixes, a single-file change, a question, or anything you could already start on. When the extra round is over, do the work. Do not call it twice in a row.",
       parameters: {
@@ -1626,10 +1658,10 @@ const toolSpecs = [
   },
 ];
 
-const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "read_attachment", "datetime", "list_memories", "read_skill", "get_background_task", "get_agent_status", "deploy_agent", "continue_agent", "continue_thinking", "browser_tabs", "browser_snapshot", "browser_visual_analyze"]);
+const readOnlyToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "read_attachment", "datetime", "list_memories", "read_skill", "get_background_task", "get_agent_status", "deploy_agent", "continue_agent", "cancel_agent", "message_agent", "continue_thinking", "browser_tabs", "browser_snapshot", "browser_visual_analyze"]);
 const agentExploreToolNames = new Set(["list_files", "read_file", "grep_files", "get_file_outline", "analyze_image", "read_skill", "web_search"]);
 const agentWorkerToolNames = new Set([...agentExploreToolNames, "write_file", "replace_in_file", "run_command"]);
-const indexMutatingToolNames = new Set(["write_file", "replace_in_file", "run_command", "start_background_task", "get_background_task", "deploy_agent", "continue_agent"]);
+const indexMutatingToolNames = new Set(["write_file", "replace_in_file", "run_command", "start_background_task", "get_background_task", "deploy_agent", "continue_agent", "cancel_agent"]);
 const mutatesProjectIndex = (name) => indexMutatingToolNames.has(name) || String(name || "").startsWith("mcp__");
 
 const localTimeZone = (() => {
@@ -2259,6 +2291,28 @@ const memoryHandle = (id) => String(id || "").split("-").pop() || "";
 
 const pendingMemory = new Map();
 const pendingSkills = new Map();
+const agentInbox = new Map();
+const selfCancelledRuns = new Set();
+
+const queueAgentMessage = (agentId, runId, message) => {
+  const key = String(agentId || "");
+  const queue = agentInbox.get(key) || [];
+  queue.push({ runId: String(runId || ""), text: String(message || "") });
+  agentInbox.set(key, queue.slice(-20));
+};
+
+const takeAgentMessages = (agentId, runId) => {
+  const key = String(agentId || "");
+  const queue = agentInbox.get(key) || [];
+  const wanted = String(runId || "");
+  const rest = queue.filter((item) => item.runId !== wanted);
+  if (rest.length) {
+    agentInbox.set(key, rest);
+  } else {
+    agentInbox.delete(key);
+  }
+  return queue.filter((item) => item.runId === wanted).map((item) => item.text);
+};
 
 const applyPendingSkill = async (id) => {
   const prepared = pendingSkills.get(id);
@@ -3146,6 +3200,46 @@ const executeTool = async (projectPath, index, toolCall, mode, settings, planMod
       report: running ? "" : String(run.report || "").slice(0, 8000),
     };
   }
+  if (name === "cancel_agent" || name === "message_agent") {
+    if (!agentSessionManager) {
+      return { error: "Agent session manager is unavailable." };
+    }
+    if (runtime.depth) {
+      return { error: "Sub-agents cannot manage other agents." };
+    }
+    const resolved = agentSessionManager.resolve(args.agent_id, chatId);
+    const session = resolved.session;
+    if (!session) {
+      return { error: idResolutionError("Agent", args.agent_id, resolved) };
+    }
+    const runs = Array.isArray(session.runs) ? session.runs : [];
+    const run = runs.find((item) => item.id === session.currentRunId) || runs[runs.length - 1];
+    const running = run?.status === "running";
+    if (name === "message_agent") {
+      if (planMode) {
+        return { error: "Plan mode is read-only. A running worker agent could write files on your instruction, so messaging agents is blocked in plan mode." };
+      }
+      const message = String(args.message || "").trim().slice(0, 4000);
+      if (!message) {
+        return { error: "The message is required." };
+      }
+      if (!running) {
+        return { error: `Agent "${session.name}" is not running (status ${run?.status || "unknown"}), so it cannot receive a message. Use continue_agent to start a new run on its kept context.` };
+      }
+      queueAgentMessage(session.id, run.id, message);
+      return { agentMessage: true, agentId: session.id, name: session.name, message, note: "Delivered at the start of the agent's next round." };
+    }
+    if (!running) {
+      return { agentCancel: true, agentId: session.id, name: session.name, status: run?.status || "unknown", canceled: false, note: "This agent was not running, nothing was stopped." };
+    }
+    selfCancelledRuns.add(run.id);
+    const result = await agentSessionManager.cancel(session.id);
+    if (result?.error) {
+      selfCancelledRuns.delete(run.id);
+      return result;
+    }
+    return { agentCancel: true, agentId: session.id, name: session.name, status: "canceled", canceled: true, cancelReason: String(args.reason || "").slice(0, 400) };
+  }
   if (name === "web_search") {
     return await runWebSearch(settings, args, onProgress, turnSignal);
   }
@@ -3563,7 +3657,7 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
     section("code_structure", "CODE STRUCTURE IS PART OF THE WORK, NOT A LATER CLEANUP. Split by responsibility from the first file you write: an eight hundred line main.cpp, or a single index.js holding a whole program, is a defect even when it runs. One unit per concern, named for what it owns. Define a thing exactly once and use that one definition everywhere: if the project has a math unit, every vector, matrix and angle in the project comes from it, and writing a second Vec3 in a feature file because it was quicker is one of the worst things you can do to a codebase. Before you add a type, a constant or a helper, search for it first, because the duplicate you create today is what somebody debugs for an hour next month.",
     "WHEN YOU REMOVE SOMETHING, REMOVE ALL OF IT. Deleting a feature means its call sites, its includes and imports, its declarations, its config entries, its now-unreachable helpers and its dead branches go with it. A leftover stub, an unused function, a commented-out block or an import nobody uses is not caution, it is litter that the next reader has to prove is dead. This is NOT the same thing as doing work the user did not ask for: finishing a removal you were told to make is part of that removal, while tidying an unrelated file is not.",
     "VALIDATE AT ONE BOUNDARY, THEN CHAIN FREELY. Every external thing the project reaches into, a game's entity system, an SDK, a driver, a database, a remote API, gets exactly one accessor unit that owns access to it. That unit does the existence and validity checking once and hands back either something usable or nothing. Callers chain off it and read the result directly. `entity()->position()` is the shape: by the time position() runs, entity() has already proven the pointer, so the call site does not check it again. What this forbids is the opposite shape, a validity test at every pointer hop, a wrapper around every read, a caller that reads like a minesweeper instead of an SDK consumer. Budget one or two checks per consumer in total, not one per dereference. If the accessor is missing a getter you need, ADD it there; never re-walk the same pointer chain or repeat the same query at a second call site.",
-    "C++ DEFAULTS WHEN THE USER DID NOT SPECIFY. Assume the MSVC toolchain on Windows: a .sln with .vcxproj projects, not CMake, unless the user asked for CMake or the project already uses it. Trailing return types (`auto name(...) -> type`). `const auto` and `auto*` for locals, `uintptr_t` for addresses, fixed width integers wherever the value is bit exact. Early returns and early continues instead of nested if chains, no `else` after a `return`, `->` on pointers. Free functions in flat namespaces over class-as-module, header-defined helpers `inline`. No smart pointers unless the lifetime is genuinely unclear, no PIMPL, no abstract base classes added for testability, no singletons unless the lifetime demands one. SEH (`__try`/`__except`) is not an accessor tool: at most one or two SEH boundaries in an entire project, at the outermost place where a hardware exception can actually be recovered from, never around individual reads. Ordinary C++ try/catch is fine at real error boundaries such as init, file I/O and parsing.",
+    "C++ DEFAULTS WHEN THE USER DID NOT SPECIFY. NEVER CREATE A CMakeLists.txt. The build is a Visual Studio solution: write a .sln plus one .vcxproj per project yourself, and tell the user the MSVC command that builds it. CMake is allowed in exactly two cases, when the user asks for CMake by name, or when the project already contains a CMakeLists.txt that you did not write. Everything else is forbidden, including the two excuses that sound reasonable: generating a Visual Studio project through CMake is still CMake, and adding a CMakeLists.txt next to a .sln because it is convenient or portable is still CMake. If you are about to type cmake_minimum_required, or you are listing CMakeLists.txt in a plan or a file list, you have already broken this rule; delete it and write the .sln and .vcxproj instead. Trailing return types (`auto name(...) -> type`). `const auto` and `auto*` for locals, `uintptr_t` for addresses, fixed width integers wherever the value is bit exact. Early returns and early continues instead of nested if chains, no `else` after a `return`, `->` on pointers. Free functions in flat namespaces over class-as-module, header-defined helpers `inline`. No smart pointers unless the lifetime is genuinely unclear, no PIMPL, no abstract base classes added for testability, no singletons unless the lifetime demands one. SEH (`__try`/`__except`) is not an accessor tool: at most one or two SEH boundaries in an entire project, at the outermost place where a hardware exception can actually be recovered from, never around individual reads. Ordinary C++ try/catch is fine at real error boundaries such as init, file I/O and parsing.",
     "THE SAME RULES OUTSIDE C++, AND KNOW HOW TO CHECK EACH LANGUAGE. One definition, one boundary, no monolith file, no dead code and no comments apply to Python, JavaScript, TypeScript and everything else you write here. In web and service code, validate at trust boundaries only, user input and external APIs, and never repeat that validation in internal code that already ran past the boundary. What changes per language is how you check your work before you claim anything: for C++ build the real project with its toolchain, not a stripped down snippet; for Python run `python -m py_compile` on every file you touched and then start the entry point; for Node and browser JavaScript run `node --check` per file plus the project's actual build or bundler, and `tsc --noEmit` where TypeScript is configured; for anything with a test command, run that command and quote what it actually printed. A file you only read back and thought looked right has not been checked."),
     section("permission_mode", `Command permission mode: ${mode}.`,
     "In Auto permission mode a separate overseer model (a safety classifier) reviews every command that is not plain read-only before it runs: commands it considers safe for the user's request run automatically, commands it considers risky are paused and the user is asked to approve them first. So in Auto, do not assume a non-read-only command always runs silently, and keep each command clearly scoped to what the user actually asked so the overseer can see it is legitimate. The overseer judges only run_command, never your file reads or edits, and the few catastrophic system-destroying commands stay hard-blocked in every mode no matter what it says."),
@@ -3573,6 +3667,7 @@ const buildSystemPrompt = (index, mode, payload = {}, readFiles = []) => {
   if (!payload.agentSession) {
     lines.push(section("extended_thinking", "For genuinely LARGE work you may take an extra reasoning pass before starting, with the continue_thinking tool. Use it when the task is designing a whole game, a whole framework or system architecture, a large multi-file refactor, or a real implementation plan, and whenever the user explicitly asks you to think longer or plan it out first. Do NOT use it for a small script, a few bug fixes, a single-file change, a question, or anything you can already start on: reaching for it on small work wastes the user's time. The shape is always the same: write ONE short sentence to the user saying you can do it and are going to think it through, then call continue_thinking in that SAME response with a concrete focus. It executes nothing and reads nothing, it only buys you another full round to plan in, and it shows the user 'Extended thinking' so a long pause does not look like a crash. Use the extra round properly (structure, the pieces and how they fit, the build order, what could go wrong), then do the work. It is capped per turn, never call it twice in a row, and never use it to stall instead of working. In plan mode it does not replace present_plan: think first if the design is large, then still present the plan with present_plan."));
     lines.push(section("subagents", "You can deploy focused background sub-agents with deploy_agent and reuse their persistent context with continue_agent. Use agents only when delegation has a concrete benefit or the user explicitly asks for them: independent parallel investigations, substantial read-heavy exploration that would pollute your context, or a large bounded implementation with clear ownership. Never deploy an agent for a simple lookup, a small edit, a task you can complete in a few normal tool calls, or merely to avoid working. Give each agent a complete standalone prompt, exact model id and the narrowest suitable profile. Profile choice is about reach as well as safety: explore's tools cannot leave the open project folder, so an agent that must inspect any external path needs worker, because only run_command reaches it, even for a read-only investigation. Deploy and continue calls return immediately after launch, so you can launch multiple useful agents or continue other independent work without waiting. Never poll in a waiting loop: while your turn is still running, the app automatically injects an internal event with the final report the moment an agent finishes. If your turn ends before that, the report waits in the agent session; check it with get_agent_status at the start of your next turn instead of redeploying. Sub-agents cannot talk to the user or deploy agents themselves.",
+      "You can also steer a running agent instead of waiting it out. message_agent delivers an instruction at the start of that agent's next round, so use it to narrow the scope, hand it a fact it is missing, or tell it to wrap up and report now. cancel_agent stops a run outright, for an agent that is stuck, has drifted, or whose work you no longer need because you solved it yourself; its transcript stays readable but you get no report, and continue_agent can restart it later on the kept context. Prefer a message over a cancel when the work so far is still worth something.",
       Array.isArray(payload.agentModels) && payload.agentModels.length ? `Available agent models in the current UI: ${payload.agentModels.join(", ")}.` : ""));
     if (payload.effort === majorEffort) {
       lines.push(section("major_mode",
@@ -4685,6 +4780,7 @@ const runDelegatedAgentTask = async ({
     profile: session.profile,
     payload: agentPayload,
     commandBudget: { count: 0 },
+    signal: controller.signal,
   };
   onProgress?.({
     agent: true,
@@ -4694,6 +4790,19 @@ const runDelegatedAgentTask = async ({
     name: session.name,
     model: session.model,
   });
+  const emptyCallSet = new Set();
+  const closeUnansweredCalls = (calls, answered) => {
+    let added = false;
+    for (const call of calls) {
+      if (!answered.has(call.id)) {
+        messages.push({ role: "tool", tool_call_id: call.id, content: "This tool call was never executed because the run stopped first." });
+        added = true;
+      }
+    }
+    if (added) {
+      agentSessionManager.saveContext(session.id, messages.slice(1), summary);
+    }
+  };
   onStarted?.({ session, run });
   try {
     for (let round = 0; round < maxToolRounds; round += 1) {
@@ -4706,6 +4815,10 @@ const runDelegatedAgentTask = async ({
         status = "interrupted";
         stopReason = "runtime_limit";
         break;
+      }
+      for (const note of takeAgentMessages(session.id, run.id)) {
+        messages.push({ role: "user", content: `[INTERNAL APP EVENT, not a user message] The main agent sent you this while you are working. It outranks your earlier instructions where they conflict, and the rest of your task stands.\n\n${note}` });
+        agentSessionManager.addEntry(session.id, run.id, { type: "system", text: `Message from the main agent: ${note}` });
       }
       let specs = toolsForContext(agentPayload);
       let tokens = estimateTokens(JSON.stringify(sanitizeMessages(messages))) + estimateTokens(JSON.stringify(specs));
@@ -4754,6 +4867,7 @@ const runDelegatedAgentTask = async ({
       if (controller.signal.aborted) {
         status = runtimeExpired ? "interrupted" : "canceled";
         stopReason = runtimeExpired ? "runtime_limit" : "user_canceled";
+        closeUnansweredCalls(calls, emptyCallSet);
         break;
       }
       if (!calls.length) {
@@ -4767,9 +4881,14 @@ const runDelegatedAgentTask = async ({
       }
       if (!specs.length) {
         terminalText = String(message.content || "").trim();
+        closeUnansweredCalls(calls, emptyCallSet);
         break;
       }
+      const answeredCalls = new Set();
       for (const call of calls) {
+        if (controller.signal.aborted) {
+          break;
+        }
         agentNarrator.observe({ type: "tool", tool: { id: call.id } });
         const rawCallArgs = parseToolArguments(call.function.arguments);
         const callArgs = publicBrowserArgs(call.function.name, rawCallArgs);
@@ -4788,6 +4907,10 @@ const runDelegatedAgentTask = async ({
               transcriptId,
               capTranscriptText(`${info.stdout || ""}${info.stderr ? `\n${info.stderr}` : ""}`, 12000),
             );
+            return;
+          }
+          if (info && typeof info === "object") {
+            agentSessionManager.setProgress(session.id, run.id, transcriptId, capTranscriptText(JSON.stringify(info), 4000));
           }
         };
         try {
@@ -4855,6 +4978,7 @@ const runDelegatedAgentTask = async ({
         }
         const content = capToolContent(result);
         messages.push({ role: "tool", tool_call_id: call.id, content });
+        answeredCalls.add(call.id);
         toolEvents.push({ id: call.id, name: call.function.name, args: callArgs, result });
         agentSessionManager.updateEntry(session.id, run.id, transcriptId, {
           status: result?.denied ? "denied" : (result?.error ? "failed" : "completed"),
@@ -4868,6 +4992,7 @@ const runDelegatedAgentTask = async ({
         });
         agentSessionManager.saveContext(session.id, messages.slice(1), summary);
       }
+      closeUnansweredCalls(calls, answeredCalls);
       if (status === "context_limit") {
         messages.push({ role: "user", content: "Your context limit is reached. Use no more tools. Write the best complete final report possible from the work already done." });
       }
@@ -4894,6 +5019,7 @@ const runDelegatedAgentTask = async ({
       }, controller.signal, target);
       terminalText = String(finalMessage.content || "").trim();
       delete finalMessage.reasoningText;
+      delete finalMessage.tool_calls;
       messages.push(finalMessage);
     }
   } catch (error) {
@@ -4909,6 +5035,7 @@ const runDelegatedAgentTask = async ({
   } finally {
     clearTimeout(runtimeTimer);
     agentNarrator.end();
+    takeAgentMessages(session.id, run.id);
     agentSessionManager.detachController(session.id, run.id);
   }
   const writtenFiles = collectWrittenFiles(toolEvents);
@@ -4958,15 +5085,17 @@ const runDelegatedAgent = async (options) => {
   const requestId = options.payload?.requestId || "";
   markAgentRunOpen(requestId, run.id);
   task.then((value) => {
-    queueAgentReport(requestId, {
-      agentId: session.id,
-      runId: run.id,
-      name: session.name,
-      status: value?.status || "completed",
-      durationMs: value?.durationMs || 0,
-      report: String(value?.report || ""),
-      writtenFiles: Array.isArray(value?.writtenFiles) ? value.writtenFiles : [],
-    });
+    if (!selfCancelledRuns.delete(run.id)) {
+      queueAgentReport(requestId, {
+        agentId: session.id,
+        runId: run.id,
+        name: session.name,
+        status: value?.status || "completed",
+        durationMs: value?.durationMs || 0,
+        report: String(value?.report || ""),
+        writtenFiles: Array.isArray(value?.writtenFiles) ? value.writtenFiles : [],
+      });
+    }
     markAgentRunClosed(requestId, run.id);
   }, () => {});
   task.catch(async (error) => {
