@@ -1579,6 +1579,25 @@ textarea {
   white-space: nowrap;
 }
 
+.skill-row { align-items: flex-start; gap: 14px; }
+.skill-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.skill-folder-path { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.skill-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--faint); overflow-wrap: anywhere; }
+.skill-error { font-size: 12px; color: var(--warn); line-height: 1.45; }
+.skill-body {
+  margin: 8px 0 0;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, .22);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 340px;
+  overflow: auto;
+}
+
 .agent-transcript-body {
   display: flex;
   flex: 1;
@@ -5848,6 +5867,12 @@ textarea {
   max-height: 160px;
   overflow: auto;
 }
+.approval-skill-head { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.approval-skill-head strong { color: var(--text); }
+.approval-skill-head span { color: var(--text-2); line-height: 1.45; }
+.approval-skill-source { font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
+.approval-skill-replaces { color: var(--warn); }
+.approval-skill-body { max-height: 320px; }
 .approval-reason { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
 .approval-options { display: flex; flex-direction: column; gap: 2px; }
 .approval-option {

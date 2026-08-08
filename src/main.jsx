@@ -127,6 +127,7 @@ const STRINGS = {
     "edit.nFiles": "{n} files edited",
     "cluster.commands": "Ran {n} commands",
     "cluster.agents": "Deployed {n} agents",
+    "cluster.skills": "Read {n} skills",
     "cluster.agentStatus": "Checked agent status {n}x",
     "cluster.oneRead": "Read 1 file",
     "cluster.reads": "Read {n} files",
@@ -137,6 +138,8 @@ const STRINGS = {
     "combine.searches.other": "searched {n} strings",
     "combine.reads.one": "read {n} file",
     "combine.reads.other": "read {n} files",
+    "combine.skills.one": "read {n} skill",
+    "combine.skills.other": "read {n} skills",
     "combine.commands.one": "ran {n} command",
     "combine.commands.other": "ran {n} commands",
     "combine.mcp.one": "{n} MCP call",
@@ -316,7 +319,24 @@ const STRINGS = {
     "toollabel.remember": "Saving a memory",
     "toollabel.forget": "Forgetting a memory",
     "toollabel.listMemories": "Reading memories",
+    "toollabel.readSkill": "Reading skill {x}",
+    "toollabel.installSkill": "Installing skill {x}",
     "memory.none": "No memories saved yet",
+    "settings.tabSkills": "Skills",
+    "skills.title": "Skills",
+    "skills.folder": "Skills folder",
+    "skills.open": "Open folder",
+    "skills.reload": "Reload",
+    "skills.remove": "Remove",
+    "skills.removeConfirm": "Remove the skill \"{x}\"? The folder is deleted.",
+    "skills.source": "Source",
+    "skills.local": "local",
+    "skills.view": "Show SKILL.md",
+    "skills.hide": "Hide SKILL.md",
+    "skills.broken": "Not loadable: {x}",
+    "skills.files": "{n} extra files",
+    "approval.questionSkill": "May I install this skill?",
+    "approval.skillReplaces": "Replaces the installed skill \"{x}\".",
     "web.enable": "Enable web search",
     "web.key": "Tavily API key",
     "web.results": "Results per search",
@@ -591,6 +611,7 @@ const STRINGS = {
     "edit.nFiles": "{n} Dateien bearbeitet",
     "cluster.commands": "{n} Befehle ausgeführt",
     "cluster.agents": "{n} Agenten deployed",
+    "cluster.skills": "{n} Skills gelesen",
     "cluster.agentStatus": "Agent-Status {n}x geprüft",
     "cluster.oneRead": "1 Datei gelesen",
     "cluster.reads": "{n} Dateien gelesen",
@@ -601,6 +622,8 @@ const STRINGS = {
     "combine.searches.other": "{n} Strings durchsucht",
     "combine.reads.one": "{n} Datei gelesen",
     "combine.reads.other": "{n} Dateien gelesen",
+    "combine.skills.one": "{n} Skill gelesen",
+    "combine.skills.other": "{n} Skills gelesen",
     "combine.commands.one": "{n} Befehl ausgeführt",
     "combine.commands.other": "{n} Befehle ausgeführt",
     "combine.mcp.one": "{n} MCP-Aufruf",
@@ -780,7 +803,24 @@ const STRINGS = {
     "toollabel.remember": "Speichert eine Erinnerung",
     "toollabel.forget": "Vergisst eine Erinnerung",
     "toollabel.listMemories": "Liest Erinnerungen",
+    "toollabel.readSkill": "Liest Skill {x}",
+    "toollabel.installSkill": "Installiert Skill {x}",
     "memory.none": "Noch keine Erinnerungen gespeichert",
+    "settings.tabSkills": "Skills",
+    "skills.title": "Skills",
+    "skills.folder": "Skill-Ordner",
+    "skills.open": "Ordner öffnen",
+    "skills.reload": "Neu einlesen",
+    "skills.remove": "Entfernen",
+    "skills.removeConfirm": "Skill \"{x}\" entfernen? Der Ordner wird gelöscht.",
+    "skills.source": "Quelle",
+    "skills.local": "lokal",
+    "skills.view": "SKILL.md anzeigen",
+    "skills.hide": "SKILL.md ausblenden",
+    "skills.broken": "Nicht ladbar: {x}",
+    "skills.files": "{n} weitere Dateien",
+    "approval.questionSkill": "Darf ich diesen Skill installieren?",
+    "approval.skillReplaces": "Ersetzt den installierten Skill \"{x}\".",
     "web.enable": "Websuche aktivieren",
     "web.key": "Tavily-API-Key",
     "web.results": "Treffer pro Suche",
@@ -5270,6 +5310,12 @@ const WormIcon = ({ size = 24, ...rest }) => (
   </svg>
 );
 
+const ScrollTextIcon = ({ size = 24, ...rest }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
+    <path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" />
+  </svg>
+);
+
 const LineSquiggleIcon = ({ size = 24, ...rest }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...rest}>
     <path d="M7 3.5c5-2 7 2.5 3 4C1.5 10 2 15 5 16c5 2 9-10 14-7s.5 13.5-4 12c-5-2.5.5-11 6-2" />
@@ -6157,6 +6203,9 @@ const clusterKind = (tool) => {
   if (name.startsWith("mcp__") || result.mcp) {
     return "mcp";
   }
+  if (name === "read_skill" && (result.running || result.skill)) {
+    return "skills";
+  }
   if (name === "grep_files") {
     return "searches";
   }
@@ -6328,6 +6377,9 @@ const clusterRowLabel = (tool) => {
   if (name === "deploy_agent" && result.agent) {
     return t("row.deployedAgent", { x: modelLabel(result.model) });
   }
+  if (name === "read_skill" && result.skill) {
+    return t("toollabel.readSkill", { x: result.name || "" });
+  }
   if (name === "run_command") {
     return result.command || tool.args?.command || getToolLabel(tool);
   }
@@ -6404,7 +6456,7 @@ const ClusterRow = ({ tool }) => {
 };
 
 const CommandGroup = ({ tools, kind }) => {
-  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : kind === "agents" ? BotIcon : FolderSearchIcon;
+  const Icon = kind === "commands" ? SquareTerminalIcon : kind === "mcp" ? WorkflowIcon : kind === "searches" ? Search : kind === "browser" ? Globe : kind === "agents" ? BotIcon : kind === "skills" ? ScrollTextIcon : FolderSearchIcon;
   const readFiles = clusterFileCount(tools) || tools.length;
   const label = kind === "commands"
     ? t("cluster.commands", { n: tools.length })
@@ -6416,7 +6468,9 @@ const CommandGroup = ({ tools, kind }) => {
           ? t("cluster.browser", { n: tools.length })
           : kind === "agents"
             ? t("cluster.agents", { n: tools.length })
-            : (readFiles === 1 ? t("cluster.oneRead") : t("cluster.reads", { n: readFiles }));
+            : kind === "skills"
+              ? t("cluster.skills", { n: tools.length })
+              : (readFiles === 1 ? t("cluster.oneRead") : t("cluster.reads", { n: readFiles }));
   const ranges = kind === "reads" && readFiles === 1
     ? tools.map((tool) => clusterRowMeta(tool)).filter(Boolean).join(", ")
     : "";
@@ -6476,6 +6530,7 @@ const ApprovalForm = ({ tool, onResolve }) => {
   const isWrite = Boolean(result.write);
   const isAddMcp = Boolean(result.addMcp);
   const isMemory = Boolean(result.memory);
+  const isSkill = Boolean(result.skillInstall);
   const isBrowserVision = Boolean(result.browserVision);
   const isAgentPermission = Boolean(result.agentName);
   const command = result.command || tool.args?.command || "";
@@ -6532,16 +6587,26 @@ const ApprovalForm = ({ tool, onResolve }) => {
   };
   const question = isBrowserVision
     ? t("approval.questionBrowserVision")
-    : (isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMemory ? t(result.memoryAction === "delete" ? "approval.questionForget" : "approval.questionRemember") : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand")))));
+    : isSkill
+      ? t("approval.questionSkill")
+      : (isAddMcp ? t("approval.questionAddMcp", { x: target }) : (isMemory ? t(result.memoryAction === "delete" ? "approval.questionForget" : "approval.questionRemember") : (isMcp ? t("approval.questionMcp", { x: target }) : (isWrite ? t("approval.questionWrite", { x: target }) : t("approval.questionCommand")))));
   return (
     <div className="approval-form">
       {result.agentName && <div className="approval-agent">{t("approval.agentRequest", { name: result.agentName })}</div>}
       <div className="approval-question">
-        {isAddMcp ? <Plug size={15} /> : <ShieldCheck size={15} />}
+        {isAddMcp ? <Plug size={15} /> : isSkill ? <ScrollTextIcon size={15} /> : <ShieldCheck size={15} />}
         <span>{question}</span>
         {tier && <span className={`risk-badge risk-${tier}`}>{t(`risk.${tier}`)}</span>}
       </div>
-      <pre className="approval-command">{isAddMcp ? addLine : (isMemory ? (result.text || "") : (command || target))}</pre>
+      {isSkill && (
+        <div className="approval-skill-head">
+          <strong>{result.name}</strong>
+          <span>{result.description}</span>
+          <span className="approval-skill-source">{result.source}</span>
+          {Boolean(result.replaces) && <span className="approval-skill-replaces">{t("approval.skillReplaces", { x: result.replaces })}</span>}
+        </div>
+      )}
+      <pre className={isSkill ? "approval-command approval-skill-body" : "approval-command"}>{isAddMcp ? addLine : ((isMemory || isSkill) ? (result.text || "") : (command || target))}</pre>
       {result.reason && <div className="approval-reason">{result.reason}</div>}
       <div className="approval-options">
         <label className={choice === "once" ? "approval-option is-active" : "approval-option"}>
@@ -6642,7 +6707,7 @@ const ToolStep = ({ tool }) => {
     );
   }
   const hasListing = Array.isArray(result.files) || Array.isArray(result.directories);
-  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || result.userCancelled || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.maxOutputError);
+  const hasBody = Boolean(needsPermission || tool.args?.command || result.error || result.reason || result.denied || result.userCancelled || Array.isArray(result.matches) || result.stdout || result.stderr || result.content || result.analysis || hasListing || result.verifier || result.memory || result.skillInstall || result.maxOutputError);
   return (
     <details className={`${needsPermission ? "tool-step permission" : ((result.error || result.maxOutputError) ? "tool-step failed" : "tool-step")}${isMemory ? " memory" : ""}`}>
       <summary>
@@ -6668,6 +6733,7 @@ const ToolStep = ({ tool }) => {
         {result.content && <PreBlock text={result.content} />}
         {result.analysis && <PreBlock text={result.analysis} />}
         {result.memory && result.text && <div className="tool-command">{result.text}</div>}
+        {result.skillInstall && result.installed && <div className="tool-meta">{result.name}: {result.description}</div>}
         {Array.isArray(result.memories) && (result.memories.length
           ? <pre>{result.memories.slice(0, 300).map((m) => `(${m.id}) ${m.text}`).join("\n")}</pre>
           : <div className="tool-meta">{t("memory.none")}</div>)}
@@ -7402,6 +7468,9 @@ const getToolIcon = (name = "") => {
   if (lower === "remember" || lower === "forget" || lower === "list_memories") {
     return WormIcon;
   }
+  if (lower === "read_skill" || lower === "install_skill") {
+    return ScrollTextIcon;
+  }
   if (lower.startsWith("mcp__") || lower === "add_mcp_server") {
     return AtSignIcon;
   }
@@ -7479,6 +7548,12 @@ const getToolLabel = (tool) => {
   }
   if (name === "list_memories") {
     return t("toollabel.listMemories");
+  }
+  if (name === "read_skill") {
+    return t("toollabel.readSkill", { x: tool.result?.name || tool.args?.name || "" });
+  }
+  if (name === "install_skill") {
+    return t("toollabel.installSkill", { x: tool.result?.name || "" });
   }
   if (name === "browser_tabs") {
     return t("toollabel.browserTabs");
@@ -8085,6 +8160,85 @@ const WebSearchSettings = ({ config, hasKey, onChange, onSaveKey }) => {
   );
 };
 
+const SkillsSettings = () => {
+  const [folder, setFolder] = useState("");
+  const [skills, setSkills] = useState([]);
+  const [openSlug, setOpenSlug] = useState("");
+  const [openBody, setOpenBody] = useState("");
+  const apply = (data) => {
+    if (!data || data.error) {
+      return;
+    }
+    setFolder(data.folder || "");
+    setSkills(Array.isArray(data.skills) ? data.skills : []);
+  };
+  const reload = async () => apply(await api.listSkills?.());
+  useEffect(() => {
+    reload();
+  }, []);
+  const toggle = async (skill) => apply(await api.setSkillEnabled?.(skill.slug, !skill.enabled));
+  const remove = async (skill) => {
+    if (!window.confirm(t("skills.removeConfirm", { x: skill.name }))) {
+      return;
+    }
+    if (openSlug === skill.slug) {
+      setOpenSlug("");
+      setOpenBody("");
+    }
+    apply(await api.removeSkill?.(skill.slug));
+    await reload();
+  };
+  const view = async (skill) => {
+    if (openSlug === skill.slug) {
+      setOpenSlug("");
+      setOpenBody("");
+      return;
+    }
+    const res = await api.getSkillBody?.(skill.slug);
+    setOpenSlug(skill.slug);
+    setOpenBody(res?.raw || "");
+  };
+  return (
+    <div className="web-settings">
+      <h1 className="settings-heading">{t("skills.title")}</h1>
+      <div className="settings-card">
+        <div className="settings-row">
+          <div className="settings-row-text">
+            <div className="settings-row-title">{t("skills.folder")}</div>
+            <div className="settings-row-desc skill-folder-path">{folder}</div>
+          </div>
+          <div className="skill-actions">
+            <button type="button" className="settings-key-save" onClick={() => api.openSkillsFolder?.()}>{t("skills.open")}</button>
+            <button type="button" className="settings-key-save" onClick={reload}>{t("skills.reload")}</button>
+          </div>
+        </div>
+      </div>
+      {skills.length > 0 && <div className="settings-card">
+        {skills.map((skill) => (
+          <div className="settings-row skill-row" key={skill.slug}>
+            <div className="settings-row-text">
+              <div className="settings-row-title">{skill.name}</div>
+              {skill.error
+                ? <div className="skill-error">{t("skills.broken", { x: skill.error })}</div>
+                : <div className="settings-row-desc">{skill.description}</div>}
+              <div className="skill-meta">
+                <span>{t("skills.source")}: {skill.source || t("skills.local")}</span>
+                {skill.files.length > 0 && <span>{t("skills.files", { n: skill.files.length })}</span>}
+              </div>
+              {openSlug === skill.slug && <pre className="skill-body">{openBody}</pre>}
+            </div>
+            <div className="skill-actions">
+              {!skill.error && <button type="button" className="settings-key-save" onClick={() => view(skill)}>{t(openSlug === skill.slug ? "skills.hide" : "skills.view")}</button>}
+              <button type="button" className="settings-key-save" onClick={() => remove(skill)}>{t("skills.remove")}</button>
+              {!skill.error && <span className={skill.enabled ? "toggle web-toggle is-on" : "toggle web-toggle"} onClick={() => toggle(skill)} />}
+            </div>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+};
+
 const ImageGenSettings = ({ config, onChange }) => {
   const cfg = { ...DEFAULT_IMAGE_GEN, ...(config || {}) };
   const model = IMAGE_GEN_MODELS.find((entry) => entry.id === cfg.model) || IMAGE_GEN_MODELS.find((entry) => entry.id === DEFAULT_IMAGE_GEN.model);
@@ -8315,6 +8469,7 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
       { id: "design", label: "settings.tabDesign", Icon: SunIcon },
     ] },
     { id: "integrations", label: "settings.groupIntegrations", items: [
+      { id: "skills", label: "settings.tabSkills", Icon: ScrollTextIcon },
       { id: "mcp", label: "settings.tabMcp", Icon: Plug },
       { id: "websearch", label: "settings.tabWebSearch", Icon: GlobeCheckIcon },
       { id: "imagegen", label: "settings.tabImageGen", Icon: ImageIcon },
@@ -8395,6 +8550,8 @@ const SettingsModal = ({ hasKey, value, setValue, onSave, onClose, lang, onLang,
                   </div>
                   <PersonalizationSettings personality={personality} customInstructions={customInstructions} memory={memory} narrator={narrator} onPersonality={onPersonality} onSaveInstructions={onSaveInstructions} onMemChange={onMemChange} onNarratorChange={onNarratorChange} onResetMemory={onResetMemory} showTitle={false} />
                 </div>
+              ) : tab === "skills" ? (
+                <SkillsSettings />
               ) : tab === "mcp" ? (
                 <div className="settings-panel">
                   <h1 className="settings-heading">{t("settings.tabMcp")}</h1>
